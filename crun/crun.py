@@ -4,6 +4,7 @@ crun - Compile, run, and clean up a C source file (Go-style).
 Usage: crun <file.c> [program args...]
 """
 
+import argparse
 import sys
 import os
 import signal
@@ -33,6 +34,38 @@ CFLAGS = [
 ]
 
 
+def cleanup_orphans():
+    cache_dir = Path.home() / ".cache" / "crun"
+    purged = 0
+
+    if not cache_dir.is_dir():
+        return
+
+    for entry in cache_dir.iterdir():
+        if entry.is_dir():
+            origin_file = entry / "source_origin.txt"
+
+            if origin_file.exists():
+                source_path_str = origin_file.read_text().strip()
+                source_path = Path(source_path_str)
+
+                if not source_path.exists():
+                    print(
+                        f"Purging orphaned cache: {entry.name} (Source missing: {source_path_str})"
+                    )
+                    shutil.rmtree(entry)
+                    purged += 1
+            else:
+                print(
+                    f"Purging potential corrupted entry: {entry.name} (Missing source_origin.txt)"
+                )
+                shutil.rmtree(entry)
+                purged += 1
+
+    if purged == 0:
+        print("Nothing to cleanup")
+
+
 def die(msg: str, code: int = 1) -> None:
     print(f"{RED}error:{RESET} {msg}", file=sys.stderr)
     sys.exit(code)
@@ -60,12 +93,36 @@ def is_cached(source: str, binary: Path) -> bool:
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print(f"{BOLD}Usage:{RESET} crun <file.c> [program args...]")
+    parser = argparse.ArgumentParser(
+        description="Compile, run, and clean up C source files."
+    )
+
+    # source file (optional if cleaning)
+    parser.add_argument("source", nargs="?", help="The C source file to run")
+
+    # cleanup flag
+    parser.add_argument(
+        "--clean", action="store_true", help="Remove orphaned cache entries"
+    )
+
+    # remaining args
+    parser.add_argument(
+        "prog_args", nargs=argparse.REMAINDER, help="Arguments passed to the C program"
+    )
+
+    args = parser.parse_args()
+
+    # cleanup
+    if args.clean:
+        cleanup_orphans()
+        sys.exit(0)
+
+    if not args.source:
+        parser.print_help()
         sys.exit(1)
 
-    source = sys.argv[1]
-    prog_args = sys.argv[2:]
+    source = args.source
+    prog_args = args.prog_args
 
     # ── Validate source ────────────────────────────────────────────────────────
     if not os.path.isfile(source):
