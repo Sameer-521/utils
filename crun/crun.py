@@ -47,9 +47,10 @@ def find_compiler() -> str | None:
 
 def cache_binary_path(source: str) -> Path:
     abs_src = os.path.abspath(source)
-    key = hashlib.sha256(abs_src.encode()).hexdigest()[:16]
+    key = hashlib.sha256(abs_src.encode()).hexdigest()[:8]
     stem = Path(source).stem
-    return Path.home() / ".cache" / "crun" / key / stem
+    folder_name = f"{stem}-{key}"
+    return Path.home() / ".cache" / "crun" / folder_name / stem
 
 
 def is_cached(source: str, binary: Path) -> bool:
@@ -89,6 +90,9 @@ def main() -> None:
         result = subprocess.run(compile_cmd)
         if result.returncode != 0:
             die("compilation failed", result.returncode)
+        else:
+            with open(binary.parent / "source_origin.txt", "w", encoding="utf-8") as f:
+                f.write(os.path.abspath(source))
 
     # ── Run ────────────────────────────────────────────────────────────────────
     if len(prog_args) > 3:
