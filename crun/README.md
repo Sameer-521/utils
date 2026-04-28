@@ -16,7 +16,8 @@ No leftover binaries. No accidental `a.out` clobbers. Compiler warnings on by de
 1. Compiles your `.c` file with `gcc` (falls back to `cc` or `clang`)
 2. Names the binary after the source file — `hello.c` → `./hello`
 3. Runs it, forwarding any arguments you pass
-4. Deletes the binary immediately after, regardless of exit code
+4. Caches the binary into the .cache directory and uses a simple mtime 
+comparison between the source and binary for potential compilation skips
 5. Forwards the program's exit code back to the shell
 
 ---
@@ -133,28 +134,6 @@ These flags are applied on every compile:
 | `-Wshadow` | Warns when an inner variable silently hides an outer one |
 | `-g` | Embeds debug symbols (lets you attach `gdb` or `valgrind` without recompiling) |
 
----
-
-## Temporary debugging with gdb / valgrind
-
-`crun` deletes the binary after running. If you need to inspect it, comment out the
-cleanup line in the script temporarily:
-
-```python
-# os.remove(binary)   ← comment this out
-```
-
-Then run manually and attach your tool:
-
-```bash
-crun hello.c                  # binary stays as ./hello
-valgrind ./hello
-gdb ./hello
-```
-
-Uncomment the line when you're done.
-
----
 
 ## Error handling
 

@@ -6,6 +6,7 @@ Usage: crun <file.c> [program args...]
 
 import sys
 import os
+import signal
 import subprocess
 import shutil
 import hashlib
@@ -100,15 +101,21 @@ def main() -> None:
     print(f"{BOLD}[run]{RESET} {run_display}")
     print(DIVIDER)
 
-    run_result = subprocess.run([str(binary), *prog_args])
+    run_result = subprocess.run(
+        [str(binary), *prog_args], capture_output=False, text=True
+    )
     exit_code = run_result.returncode
 
     print(f"\n{DIVIDER}")
 
     if exit_code != 0:
-        print(f"{YELLOW}[exit {exit_code}]{RESET}")
-
-    sys.exit(exit_code)
+        # Check for negative exit codes (which indicate signals on Unix)
+        if exit_code < 0:
+            sig_name = signal.Signals(-exit_code).name
+            print(f"{RED}[crashed with {sig_name}]{RESET}")
+        else:
+            print(f"{YELLOW}[exit {exit_code}]{RESET}")
+            sys.exit(exit_code)
 
 
 if __name__ == "__main__":
