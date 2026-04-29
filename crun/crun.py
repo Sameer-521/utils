@@ -34,12 +34,17 @@ CFLAGS = [
 ]
 
 
-def cleanup_orphans():
+def cleanup_orphans(dry_run: bool = False):
     cache_dir = Path.home() / ".cache" / "crun"
-    purged = 0
+    to_purge = []
 
     if not cache_dir.is_dir():
         return
+
+    if dry_run:
+        print(f"{BOLD}[cleanup --dry-run]{RESET}")
+    else:
+        print(f"{BOLD}[cleanup]{RESET}")
 
     for entry in cache_dir.iterdir():
         if entry.is_dir():
@@ -50,20 +55,34 @@ def cleanup_orphans():
                 source_path = Path(source_path_str)
 
                 if not source_path.exists():
-                    print(
-                        f"Purging orphaned cache: {entry.name} (Source missing: {source_path_str})"
-                    )
-                    shutil.rmtree(entry)
-                    purged += 1
-            else:
-                print(
-                    f"Purging potential corrupted entry: {entry.name} (Missing source_origin.txt)"
-                )
-                shutil.rmtree(entry)
-                purged += 1
+                    p_dict = {
+                        "entry": entry,
+                        "msg": f"Purging orphaned cache entry: {entry.name} (Source missing: {source_path_str})",
+                    }
+                    if dry_run:
+                        p_dict["msg"] = (
+                            f"Found orphaned cache entry: {entry.name} (Source missing: {source_path_str})"
+                        )
+                    to_purge.append(p_dict)
 
-    if purged == 0:
+            else:
+                p_dict = {
+                    "entry": entry,
+                    "msg": f"Purging potential corrupted entry: {entry.name} (Missing source_origin.txt)",
+                }
+                if dry_run:
+                    p_dict["msg"] = (
+                        f"Found potential corrupted entry: {entry.name} (Missing source_origin.txt)"
+                    )
+                to_purge.append(p_dict)
+
+    if not to_purge:
         print("Nothing to cleanup")
+    else:
+        for item in to_purge:
+            print(item["msg"])
+            if not dry_run:
+                shutil.rmtree(item["entry"])
 
 
 def die(msg: str, code: int = 1) -> None:
@@ -78,7 +97,7 @@ def find_compiler() -> str | None:
     die("no C compiler found (looked for gcc, cc, clang)")
 
 
-def cache_binary_path(source: str) -> Path:
+def get_cache_binary_path(source: str) -> Path:
     abs_src = os.path.abspath(source)
     key = hashlib.sha256(abs_src.encode()).hexdigest()[:8]
     stem = Path(source).stem
@@ -86,10 +105,31 @@ def cache_binary_path(source: str) -> Path:
     return Path.home() / ".cache" / "crun" / folder_name / stem
 
 
-def is_cached(source: str, binary: Path) -> bool:
-    if not binary.exists():
+def cache_source(source: str, binary: Path):
+    cache_dir = binary.parent
+    source_hash_file = cache_dir / "source_hash.txt"
+
+    with open(source, "rb") as f:
+        src_hash = hashlib.file_digest(f, "sha256").hexdigest()
+
+    with open(source_hash_file, "w") as f:
+        f.write(src_hash)
+
+
+def is_source_cached(source: str, binary: Path) -> bool:
+    cache_dir = binary.parent
+    source_hash_file = cache_dir / "source_hash.txt"
+
+    if not binary.exists() or not source_hash_file.exists():
         return False
-    return binary.stat().st_mtime >= os.path.getmtime(source)
+
+    with open(source_hash_file, "r") as f:
+        stored_hash = f.read().strip()
+
+    with open(source, "rb") as f:
+        src_hash = hashlib.file_digest(f, "sha256").hexdigest()
+
+    return stored_hash == src_hash
 
 
 def main() -> None:
@@ -105,6 +145,13 @@ def main() -> None:
         "--clean", action="store_true", help="Remove orphaned cache entries"
     )
 
+    # dry run cleanup
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Check for orphaned and corrupted cache entries",
+    )
+
     # remaining args
     parser.add_argument(
         "prog_args", nargs=argparse.REMAINDER, help="Arguments passed to the C program"
@@ -114,7 +161,7 @@ def main() -> None:
 
     # cleanup
     if args.clean:
-        cleanup_orphans()
+        cleanup_orphans(dry_run=True) if args.dry_run else cleanup_orphans()
         sys.exit(0)
 
     if not args.source:
@@ -133,11 +180,11 @@ def main() -> None:
             f"{YELLOW}warning:{RESET} '{source}' does not have a .c extension, proceeding anyway"
         )
 
-    binary = cache_binary_path(source)
+    binary = get_cache_binary_path(source)
     cc = find_compiler()
 
     # ── Compile ────────────────────────────────────────────────────────────────
-    if is_cached(source, binary):
+    if is_source_cached(source, binary):
         print(f"{BOLD}[cache]{RESET} {source} — skipping compilation")
     else:
         binary.parent.mkdir(parents=True, exist_ok=True)
@@ -148,8 +195,13 @@ def main() -> None:
         if result.returncode != 0:
             die("compilation failed", result.returncode)
         else:
-            with open(binary.parent / "source_origin.txt", "w", encoding="utf-8") as f:
-                f.write(os.path.abspath(source))
+            src_origin = binary.parent / "source_origin.txt"
+            if not src_origin.exists():
+                with open(src_origin, "w", encoding="utf-8") as f:
+                    f.write(os.path.abspath(source))
+
+            # update hash
+            cache_source(source, binary)
 
     # ── Run ────────────────────────────────────────────────────────────────────
     if len(prog_args) > 3:
