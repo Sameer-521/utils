@@ -5,13 +5,19 @@ Usage: crun <file.c> [program args...]
 """
 
 import argparse
+import json
 import sys
 import os
+import re
 import signal
 import subprocess
 import shutil
 import hashlib
 from pathlib import Path
+
+INCLUDE_RE = re.compile(r'^\s*#include\s+"([^"]+)"', re.MULTILINE)
+
+CACHE_DIR = Path.home() / ".cache" / "crun"
 
 # ANSI colours
 RED = "\033[0;31m"
@@ -34,11 +40,57 @@ CFLAGS = [
 ]
 
 
-def cleanup_orphans(dry_run: bool = False):
-    cache_dir = Path.home() / ".cache" / "crun"
+def resolve_local_headers(source_file: str) -> dict[str, float]:
+    """
+    Returns {absolute_header_path: mtime} for all local includes in a source file.
+    Paths are resolved relative to the including file's directory.
+    """
+    source_file = os.path.realpath(source_file)
+    source_dir = os.path.dirname(source_file)
+
+    headers = {}
+    with open(source_file) as f:
+        content = f.read()
+
+    for match in INCLUDE_RE.finditer(content):
+        raw = match.group(1)
+        abs_path = os.path.realpath(os.path.join(source_dir, raw))
+        if os.path.isfile(abs_path):
+            headers[abs_path] = os.stat(abs_path).st_mtime
+
+    return headers
+
+
+def headers_changed(snapshot: dict[str, float]) -> bool:
+    """
+    Returns True if any header in the snapshot has a different mtime.
+    """
+    for path, old_mtime in snapshot.items():
+        try:
+            if os.stat(path).st_mtime != old_mtime:
+                return True
+        except FileNotFoundError:
+            return True  # deleted = changed
+    return False
+
+
+def clear_cache():
+    if not CACHE_DIR.is_dir():
+        return
+
+    print(f"{BOLD}[cleanup --force-cleanup]{RESET}")
+    for entry in CACHE_DIR.iterdir():
+        if entry.is_dir():
+            print(f"Purging {entry}")
+            shutil.rmtree(entry)
+
+    print("Cache cleared")
+
+
+def cleanup_orphans(dry_run: bool = False) -> None:
     to_purge = []
 
-    if not cache_dir.is_dir():
+    if not CACHE_DIR.is_dir():
         return
 
     if dry_run:
@@ -46,7 +98,7 @@ def cleanup_orphans(dry_run: bool = False):
     else:
         print(f"{BOLD}[cleanup]{RESET}")
 
-    for entry in cache_dir.iterdir():
+    for entry in CACHE_DIR.iterdir():
         if entry.is_dir():
             origin_file = entry / "source_origin.txt"
 
@@ -60,9 +112,8 @@ def cleanup_orphans(dry_run: bool = False):
                         "msg": f"Purging orphaned cache entry: {entry.name} (Source missing: {source_path_str})",
                     }
                     if dry_run:
-                        p_dict["msg"] = (
-                            f"Found orphaned cache entry: {entry.name} (Source missing: {source_path_str})"
-                        )
+                        p_dict["msg"] = p_dict["msg"].replace("Purging", "Found")
+
                     to_purge.append(p_dict)
 
             else:
@@ -71,9 +122,8 @@ def cleanup_orphans(dry_run: bool = False):
                     "msg": f"Purging potential corrupted entry: {entry.name} (Missing source_origin.txt)",
                 }
                 if dry_run:
-                    p_dict["msg"] = (
-                        f"Found potential corrupted entry: {entry.name} (Missing source_origin.txt)"
-                    )
+                    p_dict["msg"] = p_dict["msg"].replace("Purging", "Found")
+
                 to_purge.append(p_dict)
 
     if not to_purge:
@@ -105,26 +155,48 @@ def get_cache_binary_path(source: str) -> Path:
     return Path.home() / ".cache" / "crun" / folder_name / stem
 
 
-def cache_source(source: str, binary: Path):
+def write_cache_manifest(source: str, binary: Path) -> None:
     cache_dir = binary.parent
-    source_hash_file = cache_dir / "source_hash.txt"
+    manifest_file = cache_dir / "cache_manifest.json"
+    headers_snapshots = resolve_local_headers(source)
 
-    with open(source, "rb") as f:
-        src_hash = hashlib.file_digest(f, "sha256").hexdigest()
+    try:
+        with open(source, "rb") as f:
+            src_hash = hashlib.file_digest(f, "sha256").hexdigest()
+    except FileNotFoundError:
+        return
 
-    with open(source_hash_file, "w") as f:
-        f.write(src_hash)
+    manifest_contents = {
+        "headers": headers_snapshots,
+        "src_hash": src_hash,
+    }
+
+    with open(manifest_file, "w") as file:
+        json.dump(manifest_contents, file, indent=4)
+
+
+def read_stored_headers(binary: Path) -> dict[str, float]:
+    cache_dir = binary.parent
+    cache_manifest_file = cache_dir / "cache_manifest.json"
+
+    try:
+        with open(cache_manifest_file, "r") as f:
+            contents = json.load(f)
+            return contents["headers"]
+    except FileNotFoundError:
+        return {}
 
 
 def is_source_cached(source: str, binary: Path) -> bool:
     cache_dir = binary.parent
-    source_hash_file = cache_dir / "source_hash.txt"
+    cache_manifest_file = cache_dir / "cache_manifest.json"
 
-    if not binary.exists() or not source_hash_file.exists():
+    if not binary.exists() or not cache_manifest_file.exists():
         return False
 
-    with open(source_hash_file, "r") as f:
-        stored_hash = f.read().strip()
+    with open(cache_manifest_file, "r") as f:
+        contents = json.load(f)
+        stored_hash = contents["src_hash"]
 
     with open(source, "rb") as f:
         src_hash = hashlib.file_digest(f, "sha256").hexdigest()
@@ -152,6 +224,11 @@ def main() -> None:
         help="Check for orphaned and corrupted cache entries",
     )
 
+    # force-cleanup
+    parser.add_argument(
+        "--force-cleanup", action="store_true", help="Force clear cache"
+    )
+
     # remaining args
     parser.add_argument(
         "prog_args", nargs=argparse.REMAINDER, help="Arguments passed to the C program"
@@ -161,6 +238,9 @@ def main() -> None:
 
     # cleanup
     if args.clean:
+        if args.force_cleanup:
+            clear_cache()
+            sys.exit(0)
         cleanup_orphans(dry_run=True) if args.dry_run else cleanup_orphans()
         sys.exit(0)
 
@@ -182,9 +262,10 @@ def main() -> None:
 
     binary = get_cache_binary_path(source)
     cc = find_compiler()
+    stored_headers = read_stored_headers(binary)
 
     # ── Compile ────────────────────────────────────────────────────────────────
-    if is_source_cached(source, binary):
+    if is_source_cached(source, binary) and not headers_changed(stored_headers):
         print(f"{BOLD}[cache]{RESET} {source} — skipping compilation")
     else:
         binary.parent.mkdir(parents=True, exist_ok=True)
@@ -200,8 +281,8 @@ def main() -> None:
                 with open(src_origin, "w", encoding="utf-8") as f:
                     f.write(os.path.abspath(source))
 
-            # update hash
-            cache_source(source, binary)
+            # write/update cache_manifest
+            write_cache_manifest(source, binary)
 
     # ── Run ────────────────────────────────────────────────────────────────────
     if len(prog_args) > 3:
