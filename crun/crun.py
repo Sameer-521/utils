@@ -230,7 +230,7 @@ def main() -> None:
     )
 
     # link math.h
-    parser.add_argument("--lm", action="store_true", help="Link math.h")
+    parser.add_argument("--lm", action="store_true", help="Link libm")
 
     # remaining args
     parser.add_argument(
