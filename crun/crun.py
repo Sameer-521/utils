@@ -78,7 +78,7 @@ def clear_cache():
     if not CACHE_DIR.is_dir():
         return
 
-    print(f"{BOLD}[cleanup --force-cleanup]{RESET}")
+    print(f"{BOLD}[cleanup --force-clear-cache]{RESET}")
     for entry in CACHE_DIR.iterdir():
         if entry.is_dir():
             print(f"Purging {entry}")
@@ -224,10 +224,13 @@ def main() -> None:
         help="Check for orphaned and corrupted cache entries",
     )
 
-    # force-cleanup
+    # force-clear cache
     parser.add_argument(
-        "--force-cleanup", action="store_true", help="Force clear cache"
+        "--force-clear-cache", action="store_true", help="Force clear cache"
     )
+
+    # link math.h
+    parser.add_argument("--lm", action="store_true", help="Link math.h")
 
     # remaining args
     parser.add_argument(
@@ -236,11 +239,12 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    if args.force_clear_cache:
+        clear_cache()
+        sys.exit(0)
+
     # cleanup
     if args.clean:
-        if args.force_cleanup:
-            clear_cache()
-            sys.exit(0)
         cleanup_orphans(dry_run=True) if args.dry_run else cleanup_orphans()
         sys.exit(0)
 
@@ -270,6 +274,8 @@ def main() -> None:
     else:
         binary.parent.mkdir(parents=True, exist_ok=True)
         compile_cmd = [cc, *CFLAGS, "-o", str(binary), source]
+        if args.lm:
+            compile_cmd.append("-lm")
         print(f"{BOLD}[{cc}]{RESET} compiling {source} → {binary}")
 
         result = subprocess.run(compile_cmd)
