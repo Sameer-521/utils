@@ -229,6 +229,13 @@ def main() -> None:
         "--force-clear-cache", action="store_true", help="Force clear cache"
     )
 
+    # keep binary in source code directory
+    parser.add_argument(
+        "--keep",
+        action="store_true",
+        help="Keep copy of the binary in the source code directory",
+    )
+
     # link math.h
     parser.add_argument("--lm", action="store_true", help="Link libm")
 
@@ -254,68 +261,71 @@ def main() -> None:
 
     source = args.source
     prog_args = args.prog_args
+    try:
+        # ── Validate source ────────────────────────────────────────────────────────
+        if not os.path.isfile(source):
+            die(f"file '{source}' not found")
 
-    # ── Validate source ────────────────────────────────────────────────────────
-    if not os.path.isfile(source):
-        die(f"file '{source}' not found")
+        if not source.endswith(".c"):
+            print(
+                f"{YELLOW}warning:{RESET} '{source}' does not have a .c extension, proceeding anyway"
+            )
 
-    if not source.endswith(".c"):
-        print(
-            f"{YELLOW}warning:{RESET} '{source}' does not have a .c extension, proceeding anyway"
-        )
+        binary = get_cache_binary_path(source)
+        cc = find_compiler()
+        stored_headers = read_stored_headers(binary)
 
-    binary = get_cache_binary_path(source)
-    cc = find_compiler()
-    stored_headers = read_stored_headers(binary)
-
-    # ── Compile ────────────────────────────────────────────────────────────────
-    if is_source_cached(source, binary) and not headers_changed(stored_headers):
-        print(f"{BOLD}[cache]{RESET} {source} — skipping compilation")
-    else:
-        binary.parent.mkdir(parents=True, exist_ok=True)
-        compile_cmd = [cc, *CFLAGS, "-o", str(binary), source]
-        if args.lm:
-            compile_cmd.append("-lm")
-        print(f"{BOLD}[{cc}]{RESET} compiling {source} → {binary}")
-
-        result = subprocess.run(compile_cmd)
-        if result.returncode != 0:
-            die("compilation failed", result.returncode)
+        # ── Compile ────────────────────────────────────────────────────────────────
+        if is_source_cached(source, binary) and not headers_changed(stored_headers):
+            print(f"{BOLD}[cache]{RESET} {source} — skipping compilation")
         else:
-            src_origin = binary.parent / "source_origin.txt"
-            if not src_origin.exists():
-                with open(src_origin, "w", encoding="utf-8") as f:
-                    f.write(os.path.abspath(source))
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            compile_cmd = [cc, *CFLAGS, "-o", str(binary), source]
+            if args.lm:
+                compile_cmd.append("-lm")
+            print(f"{BOLD}[{cc}]{RESET} compiling {source} → {binary}")
 
-            # write/update cache_manifest
-            write_cache_manifest(source, binary)
+            result = subprocess.run(compile_cmd)
+            if result.returncode != 0:
+                die("compilation failed", result.returncode)
+            else:
+                src_origin = binary.parent / "source_origin.txt"
+                if not src_origin.exists():
+                    with open(src_origin, "w", encoding="utf-8") as f:
+                        f.write(os.path.abspath(source))
 
-    # ── Run ────────────────────────────────────────────────────────────────────
-    if len(prog_args) > 3:
-        run_display = " ".join(
-            [str(binary), *prog_args[:3], f"...({len(prog_args) - 3} more)"]
-        )
-    else:
-        run_display = " ".join([str(binary), *prog_args])
+                # write/update cache_manifest
+                write_cache_manifest(source, binary)
 
-    print(f"{BOLD}[run]{RESET} {run_display}")
-    print(DIVIDER)
-
-    run_result = subprocess.run(
-        [str(binary), *prog_args], capture_output=False, text=True
-    )
-    exit_code = run_result.returncode
-
-    print(f"\n{DIVIDER}")
-
-    if exit_code != 0:
-        # Check for negative exit codes (which indicate signals on Unix)
-        if exit_code < 0:
-            sig_name = signal.Signals(-exit_code).name
-            print(f"{RED}[crashed with {sig_name}]{RESET}")
+        # ── Run ────────────────────────────────────────────────────────────────────
+        if len(prog_args) > 3:
+            run_display = " ".join(
+                [str(binary), *prog_args[:3], f"...({len(prog_args) - 3} more)"]
+            )
         else:
-            print(f"{YELLOW}[exit {exit_code}]{RESET}")
-            sys.exit(exit_code)
+            run_display = " ".join([str(binary), *prog_args])
+
+        print(f"{BOLD}[run]{RESET} {run_display}")
+        print(DIVIDER)
+
+        run_result = subprocess.run(
+            [str(binary), *prog_args], capture_output=False, text=True
+        )
+        exit_code = run_result.returncode
+
+        print(f"\n{DIVIDER}")
+
+        if exit_code != 0:
+            # Check for negative exit codes (which indicate signals on Unix)
+            if exit_code < 0:
+                sig_name = signal.Signals(-exit_code).name
+                print(f"{RED}[crashed with {sig_name}]{RESET}")
+            else:
+                print(f"{YELLOW}[exit {exit_code}]{RESET}")
+                sys.exit(exit_code)
+
+    except KeyboardInterrupt:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
