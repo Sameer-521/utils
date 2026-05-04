@@ -17,7 +17,7 @@ No leftover binaries. No accidental `a.out` clobbers. Compiler warnings on by de
 1. Compiles your `.c` file with `gcc` (falls back to `cc` or `clang`)
 2. Names the binary after the source file - `hello.c` becomes `./hello`
 3. Runs it, forwarding any arguments you pass
-4. Caches the binary into ~/.cache/crun/ and uses mtime comparison between source and binary to skip recompilation
+4. Caches the binary into `~/.cache/crun/` and uses hash comparison and local header tracking to skip recompilation
 5. Tracks the source file path in `source_origin.txt` for cleanup purposes
 6. Forwards the program's exit code back to the shell
 7. Detects and reports crashes caused by signals (e.g., SIGSEGV)
@@ -95,7 +95,7 @@ crun
 ## Usage
 
 ```
-crun <file.c> [program args...]
+crun <file.c> [options] [program args...]
 ```
 
 ### Basic
@@ -112,23 +112,19 @@ crun args.c foo bar baz
 
 Your program receives these via `argc` / `argv` as normal.
 
-### Using the exit code
+### Linking the math library
 
-`crun` forwards your program's exit code, so it composes with shell logic:
-
-```bash
-crun myprogram.c && echo "success"
-```
-
-### Cleaning up orphaned cache entries
-
-When source files are deleted, their cached binaries become orphaned. Use the cleanup command:
+Use the `--lm` flag to link `libm` during compilation:
 
 ```bash
-crun --clean
+crun --lm math_demo.c
 ```
 
-This removes cache entries where the source file no longer exists or where metadata is corrupted.
+### Cleaning up the cache
+
+*   **--clean**: Removes orphaned cache entries where the source file no longer exists.
+*   **--dry-run**: Used with `--clean` to see what would be removed without actually deleting files.
+*   **--force-clear-cache**: Completely purges the entire cache directory.
 
 ---
 
@@ -144,7 +140,7 @@ These flags are applied on every compile:
 | `-Wpedantic` | Strict ISO conformance; catches GCC-specific extensions |
 | `-Wconversion` | Implicit narrowing and sign conversion warnings |
 | `-Wshadow` | Warns when an inner variable silently hides an outer one |
-| `-g` | Embeds debug symbols (lets you attach `gdb` or `valgrind` without recompiling) |
+| `-g` | Embeds debug symbols |
 
 ---
 
@@ -163,18 +159,17 @@ These flags are applied on every compile:
 
 ## Cache management
 
-Binaries are cached in `~/.cache/crun/` with readable directory names in the format `<source-name>-<hash>/`. Each cache entry includes:
+Binaries are stored in `~/.cache/crun/` using the format `<source-name>-<hash>/`. The script uses a `cache_manifest.json` file to manage:
 
-- The compiled binary
-- `source_origin.txt`: Path to the original source file for validation
-
-The cache is automatically validated by comparing modification times. If the source file is newer than the cached binary, recompilation is triggered.
+*   **Source Integrity**: Stores a SHA256 hash of the source code.
+*   **Local Header Tracking**: Tracks modification times of headers included via `#include "..."` to trigger recompilation if a header changes.
+*   **Source Origin**: Keeps the absolute path to the source file in `source_origin.txt` for cache validation and cleanup.
 
 ---
 
 ## Notes
 
-- The binary is always named after the source file (`prog.c` becomes `prog`), never `a.out`
-- If the source file has no extension, the binary is named `<file>.out` to avoid clobbering it
-- Works with both relative and absolute paths
-- The script has no dependencies outside the Python standard library
+*   The binary is always named after the source file, never `a.out`.
+*   Works with both relative and absolute paths.
+*   Includes a `--keep` flag to keep a copy of the binary in the source directory.
+*   The script has no dependencies outside the Python standard library.
