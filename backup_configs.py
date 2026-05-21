@@ -195,7 +195,7 @@ def commit_and_push() -> None:
 
     commit_msg = input(f"\n{BOLD}Commit message:{RESET} ").strip()
     if not commit_msg:
-        commit_msg = "backup: update terminal configs"
+        commit_msg = "backup: update configs"
 
     run(["git", "commit", "-m", commit_msg], cwd=UTILS_REPO, capture=False)
     ok("Committed.")
