@@ -239,7 +239,7 @@ def commit_and_push() -> None:
         if state not in (PENDING, UNPUSHED_DIRTY):
             return
         else:
-            info("Unpushed commits found.")
+            warn("Unpushed commits found.")
 
     ans = input(f"\n{BOLD}Push to remote?{RESET} [y/N] ").strip().lower()
     if ans == "y":
