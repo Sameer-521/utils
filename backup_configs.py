@@ -40,6 +40,11 @@ RED = "\033[31m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
+CLEAN = "C"
+DIRTY = "D"
+PENDING = "P"
+UNPUSHED_DIRTY = "B"
+
 
 def info(msg: str) -> None:
     print(f"{BLUE}:: {msg}{RESET}")
@@ -173,11 +178,34 @@ def show_diff() -> None:
         print("  (no content changes)")
 
 
-def check_pending_commits() -> bool:
-    result = run(cmd=["git", "status"])
-    if "Changes not staged for commit" in result.stdout:
-        return True
-    return False
+def check_pending_commits() -> str:
+    """Check working tree and push status via porcelain output.
+
+    Returns a single character:
+        'C' — Clean: nothing staged, nothing to push
+        'D' — Dirty: unstaged or staged changes exist
+        'P' — Pending push: commits ahead of remote (tree clean)
+        'B' — Both: dirty tree AND unpushed commits
+    """
+    result = run(["git", "status", "--porcelain", "-b"], cwd=UTILS_REPO)
+
+    dirty = False
+    ahead = False
+
+    for line in result.stdout.strip().splitlines():
+        if line.startswith("##"):
+            if "[ahead" in line:
+                ahead = True
+        elif line.strip():
+            dirty = True
+
+    if dirty and ahead:
+        return "B"
+    if dirty:
+        return "D"
+    if ahead:
+        return "P"
+    return "C"
 
 
 def commit_and_push() -> None:
@@ -217,7 +245,7 @@ def main() -> None:
     check_repo()
     changed = sync_configs()
 
-    if not changed and not check_pending_commits():
+    if not changed and check_pending_commits() == CLEAN:
         ok("All configs already up-to-date — nothing to do.")
         return
 
