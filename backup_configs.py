@@ -209,24 +209,35 @@ def check_pending_commits() -> str:
 
 
 def commit_and_push() -> None:
-    """Stage all changes, commit, and optionally push."""
+    """Stage all changes, commit, and optionally push.
+
+    Handles both fresh commits and externally-committed-but-unpushed work.
+    """
     info("Staging all changes …")
     run(["git", "add", "-A"], cwd=UTILS_REPO)
 
+    committed_now = False
+
     # Show what will be committed
     result = run(["git", "diff", "--cached", "--stat"], cwd=UTILS_REPO)
-    if not result.stdout.strip():
+    if result.stdout.strip():
+        print(result.stdout)
+
+        commit_msg = input(f"\n{BOLD}Commit message:{RESET} ").strip()
+        if not commit_msg:
+            commit_msg = "backup: update configs"
+
+        run(["git", "commit", "-m", commit_msg], cwd=UTILS_REPO, capture=False)
+        ok("Committed.")
+        committed_now = True
+    else:
         warn("Nothing staged — nothing to commit.")
-        return
 
-    print(result.stdout)
-
-    commit_msg = input(f"\n{BOLD}Commit message:{RESET} ").strip()
-    if not commit_msg:
-        commit_msg = "backup: update configs"
-
-    run(["git", "commit", "-m", commit_msg], cwd=UTILS_REPO, capture=False)
-    ok("Committed.")
+    # Offer push when there are unpushed commits (fresh or external)
+    if not committed_now:
+        state = check_pending_commits()
+        if state not in (PENDING, UNPUSHED_DIRTY):
+            return
 
     ans = input(f"\n{BOLD}Push to remote?{RESET} [y/N] ").strip().lower()
     if ans == "y":
