@@ -1,0 +1,4 @@
+command = /usr/bin/fish
+
+theme = Catppuccin Mocha
+
