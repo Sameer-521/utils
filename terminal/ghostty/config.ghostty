@@ -2,3 +2,4 @@ command = /usr/bin/fish
 
 theme = Catppuccin Mocha
 
+keybind = ctrl+t=new_tab

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Backup terminal configs to ~/utils/terminal/ and optionally push to remote."""
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +21,11 @@ DIR_CONFIGS = {
         "dst": TERMINAL_DIR / "ghostty",
         "exclude": [],
     },
+    "nvim": {
+        "src": Path.home() / ".config/nvim/lua/plugins",
+        "dst": UTILS_REPO / "custom_nvim_plugins",
+        "exclude": [],
+    },
 }
 
 # Single-file configs
@@ -30,6 +34,13 @@ SINGLE_CONFIGS = {
         "src": Path.home() / ".config" / "starship.toml",
         "dst": TERMINAL_DIR / "starship.toml",
     },
+}
+
+# Lines containing any of these substrings are stripped before committing.
+# Key = config name from DIR_CONFIGS or SINGLE_CONFIGS above.
+CLEAN_PATTERNS: dict[str, list[str]] = {
+    # "starship": ["API_KEY", "SECRET_TOKEN"],
+    "fish": ["API_KEY"],
 }
 
 # ── helpers ────────────────────────────────────────────────────────────
@@ -74,6 +85,32 @@ def run(
         text=True,
     )
     return result
+
+
+def clean_content(raw: bytes, patterns: list[str]) -> bytes:
+    """Remove lines from *raw* that contain any substring in *patterns*."""
+    if not patterns:
+        return raw
+    return b"".join(
+        line + b"\n"
+        for line in raw.splitlines()
+        if not any(p in line.decode(errors="replace") for p in patterns)
+    )
+
+
+def clean_file(path: Path, patterns: list[str]) -> bool:
+    """Filter *path* with *patterns* in-place.
+
+    Returns True if any lines were actually removed.
+    """
+    if not path.is_file() or not patterns:
+        return False
+    original = path.read_bytes()
+    cleaned = clean_content(original, patterns)
+    if cleaned == original:
+        return False
+    path.write_bytes(cleaned)
+    return True
 
 
 # ── steps ──────────────────────────────────────────────────────────────
@@ -130,12 +167,18 @@ def sync_configs() -> bool:
         if result.returncode != 0:
             warn(f"rsync for {name} had warnings:\n{result.stderr}")
 
-        # rsync with -a and no -v/-i prints nothing on stdout for no-ops
         if result.stdout:
             changed = True
             ok(f"{name}: changes detected")
         else:
             ok(f"{name}: up-to-date")
+
+        patterns = CLEAN_PATTERNS.get(name)
+        if patterns:
+            for fpath in dst.rglob("*"):
+                if clean_file(fpath, patterns):
+                    changed = True
+                    info(f"{name}: stripped matching lines from {fpath.name}")
 
     # ── single-file configs ──
     for name, cfg in SINGLE_CONFIGS.items():
@@ -148,13 +191,16 @@ def sync_configs() -> bool:
 
         dst.parent.mkdir(parents=True, exist_ok=True)
 
-        # Compare content before copying
-        if dst.is_file() and src.read_bytes() == dst.read_bytes():
+        patterns = CLEAN_PATTERNS.get(name, [])
+        src_clean = clean_content(src.read_bytes(), patterns)
+        dst_clean = clean_content(dst.read_bytes(), patterns) if dst.is_file() else b""
+
+        if dst.is_file() and src_clean == dst_clean:
             ok(f"{name}: up-to-date")
             continue
 
         info(f"Copying {name} → {dst.relative_to(UTILS_REPO)}")
-        shutil.copy2(src, dst)
+        dst.write_bytes(src_clean)
         ok(f"{name}: updated")
         changed = True
 
