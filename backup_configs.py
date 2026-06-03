@@ -105,12 +105,16 @@ def clean_file(path: Path, patterns: list[str]) -> bool:
     """
     if not path.is_file() or not patterns:
         return False
-    original = path.read_bytes()
-    cleaned = clean_content(original, patterns)
-    if cleaned == original:
+    try:
+        original = path.read_bytes()
+        cleaned = clean_content(original, patterns)
+        if cleaned == original:
+            return False
+        path.write_bytes(cleaned)
+        return True
+    except OSError as exc:
+        warn(f"Could not clean {path}: {exc}")
         return False
-    path.write_bytes(cleaned)
-    return True
 
 
 # ── steps ──────────────────────────────────────────────────────────────
@@ -175,10 +179,13 @@ def sync_configs() -> bool:
 
         patterns = CLEAN_PATTERNS.get(name)
         if patterns:
-            for fpath in dst.rglob("*"):
-                if clean_file(fpath, patterns):
-                    changed = True
-                    info(f"{name}: stripped matching lines from {fpath.name}")
+            try:
+                for fpath in dst.rglob("*"):
+                    if clean_file(fpath, patterns):
+                        changed = True
+                        info(f"{name}: stripped matching lines from {fpath.name}")
+            except OSError as exc:
+                warn(f"Could not clean files under {name}: {exc}")
 
     # ── single-file configs ──
     for name, cfg in SINGLE_CONFIGS.items():
@@ -191,16 +198,23 @@ def sync_configs() -> bool:
 
         dst.parent.mkdir(parents=True, exist_ok=True)
 
-        patterns = CLEAN_PATTERNS.get(name, [])
-        src_clean = clean_content(src.read_bytes(), patterns)
-        dst_clean = clean_content(dst.read_bytes(), patterns) if dst.is_file() else b""
+        try:
+            patterns = CLEAN_PATTERNS.get(name, [])
+            src_clean = clean_content(src.read_bytes(), patterns)
+            dst_clean = (
+                clean_content(dst.read_bytes(), patterns) if dst.is_file() else b""
+            )
 
-        if dst.is_file() and src_clean == dst_clean:
-            ok(f"{name}: up-to-date")
+            if dst.is_file() and src_clean == dst_clean:
+                ok(f"{name}: up-to-date")
+                continue
+
+            info(f"Copying {name} → {dst.relative_to(UTILS_REPO)}")
+            dst.write_bytes(src_clean)
+        except OSError as exc:
+            warn(f"Could not copy {name}: {exc}")
             continue
 
-        info(f"Copying {name} → {dst.relative_to(UTILS_REPO)}")
-        dst.write_bytes(src_clean)
         ok(f"{name}: updated")
         changed = True
 
