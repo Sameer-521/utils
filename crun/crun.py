@@ -8,14 +8,12 @@ import argparse
 import json
 import sys
 import os
-import re
 import signal
 import subprocess
 import shutil
 import hashlib
+from graphlib import TopologicalSorter
 from pathlib import Path
-
-INCLUDE_RE = re.compile(r'^\s*#include\s+"([^"]+)"', re.MULTILINE)
 
 CACHE_DIR = Path.home() / ".cache" / "crun"
 
@@ -40,25 +38,83 @@ CFLAGS = [
 ]
 
 
-def resolve_local_headers(source_file: str) -> dict[str, float]:
+def resolve_local_headers(source_file: str, cc: str = "gcc") -> dict[str, float]:
     """
-    Returns {absolute_header_path: mtime} for all local includes in a source file.
-    Paths are resolved relative to the including file's directory.
+    Use gcc -MM to discover local headers, then stat them for mtimes.
+    Returns {absolute_header_path: mtime}.
     """
     source_file = os.path.realpath(source_file)
     source_dir = os.path.dirname(source_file)
 
-    headers = {}
-    with open(source_file) as f:
-        content = f.read()
+    try:
+        result = subprocess.run(
+            [cc, "-MM", source_file],
+            capture_output=True,
+            text=True,
+            cwd=source_dir,
+        )
+    except FileNotFoundError:
+        return {}
 
-    for match in INCLUDE_RE.finditer(content):
-        raw = match.group(1)
-        abs_path = os.path.realpath(os.path.join(source_dir, raw))
+    if result.returncode != 0:
+        return {}
+
+    output = result.stdout.replace("\\\n", " ")
+    if ":" in output:
+        _, deps = output.split(":", 1)
+    else:
+        deps = output
+
+    headers: dict[str, float] = {}
+    for token in deps.split():
+        token = token.strip()
+        if not token or token.endswith((".c", ".o")):
+            continue
+        abs_path = os.path.realpath(os.path.join(source_dir, token))
         if os.path.isfile(abs_path):
             headers[abs_path] = os.stat(abs_path).st_mtime
 
     return headers
+
+
+def find_source_from_header(header_path: str) -> str | None:
+    """
+    Given an absolute header path, return the corresponding .c source
+    file if it exists in the same directory.  Returns None otherwise.
+    """
+    stem, _ = os.path.splitext(header_path)
+    candidate = stem + ".c"
+    if os.path.isfile(candidate):
+        return os.path.realpath(candidate)
+    return None
+
+
+def resolve_all_sources(main_source: str, cc: str) -> list[str]:
+    """
+    DFS through local #include chains (via gcc -MM) to find every
+    reachable .c file.  Returns sources in topological order (deps first).
+    """
+    main_source = os.path.realpath(main_source)
+
+    dep_graph: dict[str, list[str]] = {}
+
+    def discover(node: str) -> None:
+        if node in dep_graph:
+            return
+        dep_graph[node] = []  # mark as being processed to prevent re-entry
+        headers = resolve_local_headers(node, cc)
+        deps: list[str] = []
+        for header_path in headers:
+            src = find_source_from_header(header_path)
+            if src and src != node:
+                deps.append(src)
+                discover(src)
+        dep_graph[node] = deps
+
+    discover(main_source)
+
+    ts = TopologicalSorter(dep_graph)
+    return list(ts.static_order())
 
 
 def headers_changed(snapshot: dict[str, float]) -> bool:
@@ -155,53 +211,80 @@ def get_cache_binary_path(source: str) -> Path:
     return Path.home() / ".cache" / "crun" / folder_name / stem
 
 
-def write_cache_manifest(source: str, binary: Path) -> None:
+def write_cache_manifest(sources: list[str], binary: Path, cc: str) -> None:
     cache_dir = binary.parent
     manifest_file = cache_dir / "cache_manifest.json"
-    headers_snapshots = resolve_local_headers(source)
 
-    try:
-        with open(source, "rb") as f:
-            src_hash = hashlib.file_digest(f, "sha256").hexdigest()
-    except FileNotFoundError:
-        return
+    sources_hashes: dict[str, str] = {}
+    all_headers: dict[str, float] = {}
+
+    for src in sources:
+        try:
+            with open(src, "rb") as f:
+                sources_hashes[src] = hashlib.file_digest(f, "sha256").hexdigest()
+        except FileNotFoundError:
+            continue
+        hdrs = resolve_local_headers(src, cc)
+        all_headers.update(hdrs)
 
     manifest_contents = {
-        "headers": headers_snapshots,
-        "src_hash": src_hash,
+        "sources": sources_hashes,
+        "headers": all_headers,
     }
 
     with open(manifest_file, "w") as file:
         json.dump(manifest_contents, file, indent=4)
 
 
-def read_stored_headers(binary: Path) -> dict[str, float]:
+def read_stored_headers(binary: Path) -> tuple[dict[str, str], dict[str, float]]:
     cache_dir = binary.parent
     cache_manifest_file = cache_dir / "cache_manifest.json"
 
     try:
         with open(cache_manifest_file, "r") as f:
             contents = json.load(f)
-            return contents["headers"]
-    except FileNotFoundError:
-        return {}
+            return contents.get("sources", {}), contents.get("headers", {})
+    except FileNotFoundError, json.JSONDecodeError:
+        return {}, {}
 
 
-def is_source_cached(source: str, binary: Path) -> bool:
+def is_source_cached(sources: list[str], binary: Path) -> bool:
     cache_dir = binary.parent
     cache_manifest_file = cache_dir / "cache_manifest.json"
 
     if not binary.exists() or not cache_manifest_file.exists():
         return False
 
-    with open(cache_manifest_file, "r") as f:
-        contents = json.load(f)
-        stored_hash = contents["src_hash"]
+    try:
+        with open(cache_manifest_file, "r") as f:
+            contents = json.load(f)
+            stored_sources = contents.get("sources", {})
+            stored_headers = contents.get("headers", {})
+    except json.JSONDecodeError, KeyError:
+        return False
 
-    with open(source, "rb") as f:
-        src_hash = hashlib.file_digest(f, "sha256").hexdigest()
+    if len(stored_sources) != len(sources):
+        return False
 
-    return stored_hash == src_hash
+    for src in sources:
+        if src not in stored_sources:
+            return False
+        try:
+            with open(src, "rb") as f:
+                current_hash = hashlib.file_digest(f, "sha256").hexdigest()
+        except FileNotFoundError:
+            return False
+        if stored_sources[src] != current_hash:
+            return False
+
+    for path, old_mtime in stored_headers.items():
+        try:
+            if os.stat(path).st_mtime != old_mtime:
+                return False
+        except FileNotFoundError:
+            return False
+
+    return True
 
 
 def main() -> None:
@@ -234,6 +317,13 @@ def main() -> None:
         "--keep",
         action="store_true",
         help="Keep copy of the binary in the source code directory",
+    )
+
+    # debug mode
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Compile with debug flags and output the binary path for a debugger",
     )
 
     # link math.h
@@ -273,29 +363,87 @@ def main() -> None:
 
         binary = get_cache_binary_path(source)
         cc = find_compiler()
-        stored_headers = read_stored_headers(binary)
+        assert cc is not None
+        all_sources = resolve_all_sources(source, cc)
 
         # ── Compile ────────────────────────────────────────────────────────────────
-        if is_source_cached(source, binary) and not headers_changed(stored_headers):
+        if args.debug:
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            compile_flags = list(CFLAGS) + ["-O0"]
+            object_files = []
+            for src in all_sources:
+                obj = binary.parent / (
+                    Path(src).stem
+                    + "."
+                    + hashlib.sha256(src.encode()).hexdigest()[:8]
+                    + ".o"
+                )
+                object_files.append(obj)
+                cmd = [cc, *compile_flags, "-c", src, "-o", str(obj)]
+                print(
+                    f"{BOLD}[{cc} debug]{RESET} compiling {src} → {obj}",
+                    file=sys.stderr,
+                )
+                result = subprocess.run(cmd)
+                if result.returncode != 0:
+                    die("compilation failed", result.returncode)
+
+            link_cmd = [
+                cc,
+                *compile_flags,
+                "-o",
+                str(binary),
+                *[str(o) for o in object_files],
+            ]
+            if args.lm:
+                link_cmd.append("-lm")
+            print(f"{BOLD}[{cc} debug]{RESET} linking → {binary}", file=sys.stderr)
+            result = subprocess.run(link_cmd)
+            if result.returncode != 0:
+                die("linking failed", result.returncode)
+
+            print(str(binary))
+            sys.exit(0)
+
+        elif is_source_cached(all_sources, binary):
             print(f"{BOLD}[cache]{RESET} {source} — skipping compilation")
         else:
             binary.parent.mkdir(parents=True, exist_ok=True)
-            compile_cmd = [cc, *CFLAGS, "-o", str(binary), source]
+            object_files = []
+            for src in all_sources:
+                obj = binary.parent / (
+                    Path(src).stem
+                    + "."
+                    + hashlib.sha256(src.encode()).hexdigest()[:8]
+                    + ".o"
+                )
+                object_files.append(obj)
+                cmd = [cc, *CFLAGS, "-c", src, "-o", str(obj)]
+                print(f"{BOLD}[{cc}]{RESET} compiling {src} → {obj}")
+                result = subprocess.run(cmd)
+                if result.returncode != 0:
+                    die("compilation failed", result.returncode)
+
+            link_cmd = [
+                cc,
+                *CFLAGS,
+                "-o",
+                str(binary),
+                *[str(o) for o in object_files],
+            ]
             if args.lm:
-                compile_cmd.append("-lm")
-            print(f"{BOLD}[{cc}]{RESET} compiling {source} → {binary}")
-
-            result = subprocess.run(compile_cmd)
+                link_cmd.append("-lm")
+            print(f"{BOLD}[{cc}]{RESET} linking → {binary}")
+            result = subprocess.run(link_cmd)
             if result.returncode != 0:
-                die("compilation failed", result.returncode)
-            else:
-                src_origin = binary.parent / "source_origin.txt"
-                if not src_origin.exists():
-                    with open(src_origin, "w", encoding="utf-8") as f:
-                        f.write(os.path.abspath(source))
+                die("linking failed", result.returncode)
 
-                # write/update cache_manifest
-                write_cache_manifest(source, binary)
+            src_origin = binary.parent / "source_origin.txt"
+            if not src_origin.exists():
+                with open(src_origin, "w", encoding="utf-8") as f:
+                    f.write(os.path.abspath(source))
+
+            write_cache_manifest(all_sources, binary, cc)
 
         # ── Run ────────────────────────────────────────────────────────────────────
         if len(prog_args) > 3:
