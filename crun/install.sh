@@ -8,10 +8,8 @@ BINARY="${INSTALL_DIR}/crun"
 
 echo "==> Downloading crun from github.com/${REPO} (${BRANCH})..."
 
-curl -fsSL "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/crun/crun.py" -o /tmp/crun.py
-
 mkdir -p "${INSTALL_DIR}"
-mv /tmp/crun.py "${BINARY}"
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/crun/crun.py" -o "${BINARY}"
 chmod +x "${BINARY}"
 
 echo "==> Installed to ${BINARY}"
