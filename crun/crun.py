@@ -5,13 +5,13 @@ Usage: crun <file.c> [program args...]
 """
 
 import argparse
+import hashlib
 import json
-import sys
 import os
+import shutil
 import signal
 import subprocess
-import shutil
-import hashlib
+import sys
 from graphlib import TopologicalSorter
 from pathlib import Path
 
@@ -244,7 +244,7 @@ def read_stored_headers(binary: Path) -> tuple[dict[str, str], dict[str, float]]
         with open(cache_manifest_file, "r") as f:
             contents = json.load(f)
             return contents.get("sources", {}), contents.get("headers", {})
-    except FileNotFoundError, json.JSONDecodeError:
+    except (FileNotFoundError, json.JSONDecodeError):
         return {}, {}
 
 
@@ -260,7 +260,7 @@ def is_source_cached(sources: list[str], binary: Path) -> bool:
             contents = json.load(f)
             stored_sources = contents.get("sources", {})
             stored_headers = contents.get("headers", {})
-    except json.JSONDecodeError, KeyError:
+    except (json.JSONDecodeError, KeyError):
         return False
 
     if len(stored_sources) != len(sources):
@@ -279,7 +279,7 @@ def is_source_cached(sources: list[str], binary: Path) -> bool:
 
     for path, old_mtime in stored_headers.items():
         try:
-            if os.stat(path).st_mtime != old_mtime:
+            if Path(path).stat().st_mtime != old_mtime:
                 return False
         except FileNotFoundError:
             return False
