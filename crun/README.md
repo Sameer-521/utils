@@ -42,7 +42,7 @@ No leftover binaries. No accidental `a.out` clobbers. Compiler warnings on by de
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Sameer-521/utils/main/crun/install.sh | bash
 ```
-If the one-liner doesn't work, please use of the manual methods as shown below.
+If the one-liner doesn't work, please use any of the manual methods as shown below.
 
 Downloads `crun` into `~/.local/bin/crun` and makes it executable.
 
