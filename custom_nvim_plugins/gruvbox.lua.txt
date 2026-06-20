@@ -1,0 +1,30 @@
+return {
+    {
+        "ellisonleao/gruvbox.nvim",
+        name = "gruvbox",
+        priority = 1000,
+        opts = {
+            terminal_colors = true, -- add neovim terminal colors
+            invert_selection = false,
+            italic = {
+                strings = true,
+                emphasis = true,
+                comments = true,
+            },
+            -- You can add any other gruvbox-specific options here
+        },
+        config = function(_, opts)
+        -- You can set background to "light" or "dark" here
+        vim.o.background = "dark"
+        require("gruvbox").setup(opts)
+        end,
+    },
+
+    -- Configure LazyVim to load gruvbox
+    {
+        "LazyVim/LazyVim",
+        opts = {
+            colorscheme = "gruvbox",
+        },
+    },
+}

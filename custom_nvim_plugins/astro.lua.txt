@@ -1,0 +1,24 @@
+return {
+    {
+        "AstroNvim/astrotheme",
+        name = "astrotheme",
+        priority = 1000,
+        opts = {
+            palette = "astrodark", -- Options: "astrodark", "astrolight", or "astromars"
+            style = {
+                transparent = false, -- Set to true if you want a transparent background
+            },
+        },
+        config = function(_, opts)
+        require("astrotheme").setup(opts)
+        end,
+    },
+
+    -- Configure LazyVim to load astrodark
+    {
+        "LazyVim/LazyVim",
+        opts = {
+            colorscheme = "astrodark",
+        },
+    },
+}
