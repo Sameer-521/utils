@@ -224,6 +224,12 @@ def sync_configs() -> bool:
         ok(f"{name}: updated")
         changed = True
 
+    # Cleaning may have reverted files to committed state, so verify
+    # the working tree actually differs from HEAD before reporting a change.
+    if changed:
+        result = run(["git", "diff", "--quiet"], cwd=UTILS_REPO)
+        changed = result.returncode != 0
+
     return changed
 
 
