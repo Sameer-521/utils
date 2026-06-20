@@ -159,7 +159,7 @@ def sync_configs() -> bool:
             continue
 
         # Build rsync args
-        args = ["rsync", "-a", "--delete"]
+        args = ["rsync", "-av", "--delete"]
         for e in exclude:
             args += ["--exclude", e]
         args += [f"{src}/", f"{dst}/"]
@@ -171,7 +171,13 @@ def sync_configs() -> bool:
         if result.returncode != 0:
             warn(f"rsync for {name} had warnings:\n{result.stderr}")
 
-        if result.stdout:
+        # -v outputs header/footer even when nothing transfers; filter those out
+        transferred = [
+            line
+            for line in result.stdout.strip().splitlines()
+            if line and not line.startswith(("sending ", "sent ", "total size"))
+        ]
+        if transferred:
             changed = True
             ok(f"{name}: changes detected")
         else:
