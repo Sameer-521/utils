@@ -28,7 +28,7 @@ DIVIDER = "─" * 40
 
 # ── Standard flags ─────────────────────────────────────────────────────────────
 CFLAGS = [
-    "-std=c99",
+    "-std=gnu99",
     "-Wall",
     "-Wextra",
     "-Wpedantic",
