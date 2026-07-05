@@ -138,7 +138,7 @@ These flags are applied on every compile:
 
 | Flag | Purpose |
 |---|---|
-| `-std=c99` | C99 standard - VLAs, `stdint.h`, `//` comments, designated initialisers |
+| `-std=gnu99` | GNU C99 standard - supports POSIX headers (ssize_t, etc.) and C99 features (VLAs, stdint.h, // comments, designated initialisers) |
 | `-Wall` | All common warnings |
 | `-Wextra` | Extra diagnostic warnings |
 | `-Wpedantic` | Strict ISO conformance; catches GCC-specific extensions |
@@ -165,7 +165,7 @@ These flags are applied on every compile:
 
 Binaries and object files are stored in `~/.cache/crun/` using the format `<source-name>-<hash>/`. The script uses a `cache_manifest.json` file to manage:
 
-*   **Multi-Source Integrity**: Stores a SHA256 hash for every discovered source file, not just the main one. Automatic dependency discovery means headers with matching `.c` files are included in the build.
+*   **Multi-Source Integrity**: Stores a SHA256 hash for every discovered source file, not just the main one. Automatic dependency discovery means headers with matching `.c` files are included in the compilation.
 *   **Local Header Tracking**: Tracks modification times of all headers included via `#include "..."` across every source file to trigger recompilation if any header changes.
 *   **Source Origin**: Keeps the absolute path to the main source file in `source_origin.txt` for cache validation and cleanup.
 
