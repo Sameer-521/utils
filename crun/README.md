@@ -17,12 +17,13 @@ No leftover binaries. No accidental `a.out` clobbers. Compiler warnings on by de
 1. Discovers all local dependencies of your `.c` file using `gcc -MM`, building a dependency graph via DFS
 2. Topologically sorts all reachable `.c` files so that dependencies are compiled first
 3. Compiles each source file to a separate object file (`.o`), then links them all into a single binary
-4. Names the binary after the main source file - `hello.c` becomes `./hello`
-5. Runs it, forwarding any arguments you pass
-6. Caches object files and the binary into `~/.cache/crun/`, using hash comparison and local header tracking to skip recompilation when nothing has changed
-7. Tracks the source file path in `source_origin.txt` for cleanup purposes
-8. Forwards the program's exit code back to the shell
-9. Detects and reports crashes caused by signals (e.g., SIGSEGV)
+4. **Incremental compilation** — on rebuild, only sources whose content or headers have changed are recompiled; untouched `.o` files are reused
+5. Names the binary after the main source file — `hello.c` becomes `./hello`
+6. Runs it, forwarding any arguments you pass
+7. Caches object files and the binary into `~/.cache/crun/`, using SHA256 hash comparison per source and per-source header tracking to skip recompilation when nothing has changed
+8. Tracks the source file path in `source_origin.txt` for cleanup purposes
+9. Forwards the program's exit code back to the shell
+10. Detects and reports crashes caused by signals (e.g., SIGSEGV)
 
 ---
 
@@ -44,13 +45,15 @@ curl -fsSL https://raw.githubusercontent.com/Sameer-521/utils/main/crun/install.
 ```
 If the one-liner doesn't work, please use any of the manual methods as shown below.
 
-Downloads `crun` into `~/.local/bin/crun` and makes it executable.
+Clones the repo, copies `crun/` into `~/.crun/`, and symlinks `~/.local/bin/crun` to the entry point.
 
 ### Manual (any platform)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Sameer-521/utils/main/crun/crun.py -o ~/.local/bin/crun
-chmod +x ~/.local/bin/crun
+git clone --depth 1 https://github.com/Sameer-521/utils.git /tmp/crun-install
+cp -r /tmp/crun-install/crun ~/.crun
+ln -sf ~/.crun/__main__.py ~/.local/bin/crun
+rm -rf /tmp/crun-install
 ```
 
 Make sure `~/.local/bin` is on your `PATH`:
@@ -62,17 +65,21 @@ export PATH="$HOME/.local/bin:$PATH"   # add to ~/.bashrc or ~/.zshrc
 ### Termux (Android)
 
 ```bash
-pkg install python gcc
-curl -fsSL https://raw.githubusercontent.com/Sameer-521/utils/main/crun/crun.py -o ~/.local/bin/crun
-chmod +x ~/.local/bin/crun
+pkg install python gcc git
+git clone --depth 1 https://github.com/Sameer-521/utils.git /tmp/crun-install
+cp -r /tmp/crun-install/crun ~/.crun
+ln -sf ~/.crun/__main__.py ~/.local/bin/crun
+rm -rf /tmp/crun-install
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
 ```
 
 ### Fish shell
 
 ```fish
-curl -fsSL https://raw.githubusercontent.com/Sameer-521/utils/main/crun/crun.py -o ~/.local/bin/crun
-chmod +x ~/.local/bin/crun
+git clone --depth 1 https://github.com/Sameer-521/utils.git /tmp/crun-install
+cp -r /tmp/crun-install/crun ~/.crun
+ln -sf ~/.crun/__main__.py ~/.local/bin/crun
+rm -rf /tmp/crun-install
 fish_add_path ~/.local/bin
 ```
 
@@ -138,7 +145,11 @@ These flags are applied on every compile:
 
 | Flag | Purpose |
 |---|---|
+<<<<<<< Updated upstream
 | `-std=gnu99` | GNU C99 standard - supports POSIX headers (ssize_t, etc.) and C99 features (VLAs, stdint.h, // comments, designated initialisers) |
+=======
+| `-std=gnu99` | GNU C99 standard — VLAs, `stdint.h`, `//` comments, designated initialisers, plus GNU extensions |
+>>>>>>> Stashed changes
 | `-Wall` | All common warnings |
 | `-Wextra` | Extra diagnostic warnings |
 | `-Wpedantic` | Strict ISO conformance; catches GCC-specific extensions |
@@ -165,8 +176,14 @@ These flags are applied on every compile:
 
 Binaries and object files are stored in `~/.cache/crun/` using the format `<source-name>-<hash>/`. The script uses a `cache_manifest.json` file to manage:
 
+<<<<<<< Updated upstream
 *   **Multi-Source Integrity**: Stores a SHA256 hash for every discovered source file, not just the main one. Automatic dependency discovery means headers with matching `.c` files are included in the compilation.
 *   **Local Header Tracking**: Tracks modification times of all headers included via `#include "..."` across every source file to trigger recompilation if any header changes.
+=======
+*   **Incremental compilation**: On rebuild, only sources whose content hash or header mtimes have changed are recompiled. Untouched `.o` files are reused and only the final link step runs. This means editing a single file in a multi-file project doesn't trigger a full rebuild.
+*   **Multi-Source Integrity**: Stores a SHA256 hash for every discovered source file, not just the main one. Automatic dependency discovery means headers with matching `.c` files are included in the build.
+*   **Per-Source Header Tracking**: Tracks modification times of headers on a per-source basis. Touching a shared header only recompiles the sources that actually include it.
+>>>>>>> Stashed changes
 *   **Source Origin**: Keeps the absolute path to the main source file in `source_origin.txt` for cache validation and cleanup.
 
 ---
@@ -174,8 +191,8 @@ Binaries and object files are stored in `~/.cache/crun/` using the format `<sour
 ## Notes
 
 *   The binary is always named after the main source file, never `a.out`.
-*   Multi-file projects are automatically handled - `#include "header.h"` with a matching `header.c` in the same directory will be discovered, compiled, and linked.
+*   Multi-file projects are automatically handled — `#include "header.h"` with a matching `header.c` in the same directory will be discovered, compiled, and linked.
 *   Works with both relative and absolute paths.
 *   Includes a `--keep` flag to keep a copy of the binary in the source directory.
-*   Includes a `--debug` flag for debugger integration - always recompiles and outputs the binary path without running.
-*   The script has no dependencies outside the Python standard library.
+*   Includes a `--debug` flag for debugger integration — always recompiles and outputs the binary path without running.
+*   No dependencies outside the Python standard library.
