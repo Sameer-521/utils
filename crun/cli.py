@@ -26,12 +26,14 @@ def compile_sources(
     compile_flags: list[str],
     lm: bool,
     label: str = "",
+    debug: bool = False,
 ) -> None:
+    out = sys.stderr if debug else sys.stdout
     tag = f"{cc} {label}".strip()
     for src in stale_sources:
         obj = obj_path(src, binary)
         cmd = [cc, *compile_flags, "-c", src, "-o", str(obj)]
-        print(f"{BOLD}[{tag}]{RESET} compiling {src} → {obj}")
+        print(f"{BOLD}[{tag}]{RESET} compiling {src} → {obj}", file=out)
         result = subprocess.run(cmd)
         if result.returncode != 0:
             die("compilation failed", result.returncode)
@@ -40,7 +42,7 @@ def compile_sources(
     link_cmd = [cc, *compile_flags, "-o", str(binary), *[str(o) for o in all_objects]]
     if lm:
         link_cmd.append("-lm")
-    print(f"{BOLD}[{tag}]{RESET} linking → {binary}")
+    print(f"{BOLD}[{tag}]{RESET} linking → {binary}", file=out)
     result = subprocess.run(link_cmd)
     if result.returncode != 0:
         die("linking failed", result.returncode)
@@ -126,6 +128,7 @@ def main() -> None:
                 list(CFLAGS) + ["-O0"],
                 args.lm,
                 "debug",
+                debug=True,
             )
             print(str(binary))
             sys.exit(0)

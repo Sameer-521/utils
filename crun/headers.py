@@ -51,18 +51,24 @@ def resolve_all_sources(main_source: str, cc: str) -> list[str]:
 
     dep_graph: dict[str, list[str]] = {}
 
+    def direct_deps(node: str) -> list[str]:
+        deps: list[str] = []
+        for header in resolve_local_headers(node, cc):
+            src = find_source_from_header(header)
+            if src and src != node:
+                deps.append(src)
+
+        return deps
+
     def discover(node: str) -> None:
         if node in dep_graph:
             return
-        dep_graph[node] = []
-        headers = resolve_local_headers(node, cc)
-        deps: list[str] = []
-        for header_path in headers:
-            src = find_source_from_header(header_path)
-            if src and src != node:
-                deps.append(src)
-                discover(src)
+
+        dep_graph[node] = []  # mark as visiting
+        deps = direct_deps(node)
         dep_graph[node] = deps
+        for dep in deps:
+            discover(dep)
 
     discover(main_source)
 

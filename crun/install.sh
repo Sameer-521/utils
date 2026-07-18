@@ -25,10 +25,10 @@ ln -sf "${CRUN_HOME}/__main__.py" "${SYMLINK}"
 echo "==> Installed to ${SYMLINK}"
 
 if ! echo "${PATH}" | tr ':' '\n' | grep -qxF "${BIN_DIR}"; then
-    echo
-    echo "NOTE: ${BIN_DIR} is not on your PATH."
-    echo "Add this to your shell rc file:"
-    echo '  export PATH="$HOME/.local/bin:$PATH"'
+  echo
+  echo "NOTE: ${BIN_DIR} is not on your PATH."
+  echo "Add this to your shell rc file:"
+  echo '  export PATH="$HOME/.local/bin:$PATH"'
 fi
 
 echo
