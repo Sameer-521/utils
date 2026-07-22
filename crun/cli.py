@@ -1,5 +1,6 @@
 import argparse
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -103,6 +104,7 @@ def main() -> None:
 
     source = args.source
     prog_args = args.prog_args
+    cwd = Path().cwd()
 
     try:
         if not os.path.isfile(source):
@@ -130,6 +132,11 @@ def main() -> None:
                 "debug",
                 debug=True,
             )
+
+            if args.keep:
+                shutil.copy(binary, cwd)
+                print(f"{BOLD}[keep]{RESET} {binary.name} → {cwd}", file=sys.stderr)
+
             print(str(binary))
             sys.exit(0)
 
@@ -158,6 +165,10 @@ def main() -> None:
             )
         else:
             run_display = " ".join([str(binary), *prog_args])
+
+        if args.keep:
+            shutil.copy(binary, cwd)
+            print(f"{BOLD}[keep]{RESET} {binary.name} → {cwd}")
 
         print(f"{BOLD}[run]{RESET} {run_display}")
         print(DIVIDER)
