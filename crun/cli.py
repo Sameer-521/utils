@@ -28,6 +28,7 @@ def compile_sources(
     lm: bool,
     label: str = "",
     debug: bool = False,
+    libs: tuple[str, ...] = (),
 ) -> None:
     out = sys.stderr if debug else sys.stdout
     tag = f"{cc} {label}".strip()
@@ -44,6 +45,7 @@ def compile_sources(
     link_cmd = [cc, *compile_flags, "-o", str(binary), *[str(o) for o in all_objects]]
     if lm:
         link_cmd.append("-lm")
+    link_cmd.extend(f"-l{lib}" for lib in libs)
     print(f"{BOLD}[{tag}]{RESET} linking → {binary}", file=out)
     result = subprocess.run(link_cmd)
     if result.returncode != 0:
@@ -84,6 +86,14 @@ def main() -> None:
     )
 
     parser.add_argument("--lm", action="store_true", help="Link libm")
+
+    parser.add_argument(
+        "--lib",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Link an extra library (-lNAME); may be repeated",
+    )
 
     parser.add_argument(
         "prog_args", nargs=argparse.REMAINDER, help="Arguments passed to the C program"
@@ -132,6 +142,7 @@ def main() -> None:
                 args.lm,
                 "debug",
                 debug=True,
+                libs=tuple(args.lib),
             )
 
             if args.keep:
@@ -151,7 +162,15 @@ def main() -> None:
             print(f"{BOLD}[cache]{RESET} {source} — skipping compilation")
         else:
             binary.parent.mkdir(parents=True, exist_ok=True)
-            compile_sources(stale, all_sources, cc, binary, CFLAGS, args.lm)
+            compile_sources(
+                stale,
+                all_sources,
+                cc,
+                binary,
+                CFLAGS,
+                args.lm,
+                libs=tuple(args.lib),
+            )
 
             src_origin = binary.parent / "source_origin.txt"
             if not src_origin.exists():

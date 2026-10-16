@@ -123,6 +123,17 @@ Use the `--lm` flag to link `libm` during compilation:
 crun --lm math_demo.c
 ```
 
+### Linking other libraries
+
+Use `--lib NAME` to link any library (`-lNAME`). The option can be repeated:
+
+```bash
+crun --lib readline shell.c
+crun --lib readline --lib ncurses shell.c
+```
+
+Put crun options before the source file. Anything after it is passed to your program.
+
 ### Debug mode
 
 The `--debug` flag always recompiles (no cache), injects `-O0`, and prints the binary path instead of running the program. Useful for piping to a debugger:
