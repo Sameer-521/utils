@@ -1,23 +1,65 @@
 import os
 import subprocess
+import sys
 from graphlib import TopologicalSorter
+
+from config import YELLOW, RESET
+
+
+def include_dirs(source_file: str) -> list[str]:
+    source_dir = os.path.dirname(os.path.realpath(source_file))
+
+    root = source_dir
+    probe = source_dir
+    while True:
+        if os.path.basename(probe) == "src":
+            root = os.path.dirname(probe)
+            break
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            break
+        probe = parent
+
+    candidates = [
+        source_dir,
+        os.path.join(root, "include"),
+        os.path.join(root, "src"),
+        root,
+    ]
+    dirs: list[str] = []
+    for d in candidates:
+        if os.path.isdir(d) and d not in dirs:
+            dirs.append(d)
+    return dirs
 
 
 def resolve_local_headers(source_file: str, cc: str = "gcc") -> dict[str, float]:
     source_file = os.path.realpath(source_file)
     source_dir = os.path.dirname(source_file)
+    include_flags = [f"-I{d}" for d in include_dirs(source_file)]
 
     try:
         result = subprocess.run(
-            [cc, "-MM", source_file],
+            [cc, "-MM", "-MG", *include_flags, source_file],
             capture_output=True,
             text=True,
             cwd=source_dir,
         )
     except FileNotFoundError:
+        print(
+            f"{YELLOW}warning:{RESET} compiler '{cc}' not found, "
+            f"header dependencies of {source_file} not tracked",
+            file=sys.stderr,
+        )
         return {}
 
     if result.returncode != 0:
+        detail = result.stderr.strip().splitlines()
+        print(
+            f"{YELLOW}warning:{RESET} could not resolve headers of {source_file}"
+            + (f": {detail[0]}" if detail else ""),
+            file=sys.stderr,
+        )
         return {}
 
     output = result.stdout.replace("\\\n", " ")
@@ -29,9 +71,11 @@ def resolve_local_headers(source_file: str, cc: str = "gcc") -> dict[str, float]
     headers: dict[str, float] = {}
     for token in deps.split():
         token = token.strip()
-        if not token or token.endswith((".c", ".o")):
+        if not token or token.endswith(".o"):
             continue
         abs_path = os.path.realpath(os.path.join(source_dir, token))
+        if abs_path == source_file:
+            continue
         if os.path.isfile(abs_path):
             headers[abs_path] = os.stat(abs_path).st_mtime
 
@@ -39,10 +83,22 @@ def resolve_local_headers(source_file: str, cc: str = "gcc") -> dict[str, float]
 
 
 def find_source_from_header(header_path: str) -> str | None:
-    stem, _ = os.path.splitext(header_path)
+    stem, ext = os.path.splitext(header_path)
+    if ext == ".c":
+        return None
     candidate = stem + ".c"
     if os.path.isfile(candidate):
         return os.path.realpath(candidate)
+
+    parts = os.path.realpath(header_path).split(os.sep)
+    for i in range(len(parts) - 2, -1, -1):
+        if parts[i] == "include":
+            root = os.sep.join(parts[:i])
+            rel = os.sep.join(parts[i + 1 :])
+            mirrored = os.path.join(root, "src", os.path.splitext(rel)[0] + ".c")
+            if os.path.isfile(mirrored):
+                return os.path.realpath(mirrored)
+            break
     return None
 
 

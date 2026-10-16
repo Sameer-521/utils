@@ -8,7 +8,7 @@ from pathlib import Path
 
 from config import CFLAGS, YELLOW, BOLD, RED, RESET, DIVIDER
 from compiler import find_compiler, die
-from headers import resolve_all_sources
+from headers import resolve_all_sources, include_dirs
 from cache import (
     get_cache_binary_path,
     get_stale_sources,
@@ -33,7 +33,8 @@ def compile_sources(
     tag = f"{cc} {label}".strip()
     for src in stale_sources:
         obj = obj_path(src, binary)
-        cmd = [cc, *compile_flags, "-c", src, "-o", str(obj)]
+        include_flags = [f"-I{d}" for d in include_dirs(src)]
+        cmd = [cc, *compile_flags, *include_flags, "-c", src, "-o", str(obj)]
         print(f"{BOLD}[{tag}]{RESET} compiling {src} → {obj}", file=out)
         result = subprocess.run(cmd)
         if result.returncode != 0:

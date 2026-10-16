@@ -6,7 +6,14 @@ BRANCH="main"
 CRUN_HOME="${HOME}/.crun"
 BIN_DIR="${HOME}/.local/bin"
 SYMLINK="${BIN_DIR}/crun"
-TMPDIR=$(mktemp -d)
+
+TMP_BASE="${TMPDIR:-}"
+if [ -z "${TMP_BASE}" ] && [ -n "${PREFIX:-}" ] && [ -d "${PREFIX}/tmp" ]; then
+  TMP_BASE="${PREFIX}/tmp"
+fi
+TMP_BASE="${TMP_BASE:-/tmp}"
+mkdir -p "${TMP_BASE}"
+TMPDIR=$(mktemp -d "${TMP_BASE}/crun-install.XXXXXX")
 
 cleanup() { rm -rf "${TMPDIR}"; }
 trap cleanup EXIT

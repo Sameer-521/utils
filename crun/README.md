@@ -14,7 +14,7 @@ No leftover binaries. No accidental `a.out` clobbers. Compiler warnings on by de
 
 ## How it works
 
-1. Discovers all local dependencies of your `.c` file using `gcc -MM`, building a dependency graph via DFS
+1. Discovers all local dependencies of your `.c` file using `gcc -MM`, with `include/`, `src/` and the project root on the include path, building a dependency graph via DFS
 2. Topologically sorts all reachable `.c` files so that dependencies are compiled first
 3. Compiles each source file to a separate object file (`.o`), then links them all into a single binary
 4. **Incremental compilation** — on rebuild, only sources whose content or headers have changed are recompiled; untouched `.o` files are reused
@@ -66,12 +66,15 @@ export PATH="$HOME/.local/bin:$PATH"   # add to ~/.bashrc or ~/.zshrc
 
 ```bash
 pkg install python gcc git
-git clone --depth 1 https://github.com/Sameer-521/utils.git /tmp/crun-install
-cp -r /tmp/crun-install/crun ~/.crun
+git clone --depth 1 https://github.com/Sameer-521/utils.git "$PREFIX/tmp/crun-install"
+mkdir -p ~/.local/bin
+cp -r "$PREFIX/tmp/crun-install/crun" ~/.crun
 ln -sf ~/.crun/__main__.py ~/.local/bin/crun
-rm -rf /tmp/crun-install
+rm -rf "$PREFIX/tmp/crun-install"
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
 ```
+
+Termux does not allow writing to `/tmp` without root, so the steps above use `$PREFIX/tmp` instead. The one-liner install also works on Termux, since `install.sh` picks `$TMPDIR` or `$PREFIX/tmp` automatically.
 
 ### Fish shell
 
@@ -139,6 +142,31 @@ gdb $(crun --debug program.c)
 
 ---
 
+## Project layouts
+
+No configuration is needed for these layouts:
+
+```
+flat/                 src-only/              include-src/
+  main.c                src/                   include/
+  util.h                  main.c                 a/b.h
+  util.c                  util.h               src/
+                          util.c                 main.c
+                                                 a/b.c
+```
+
+*   **Flat**: everything in one directory.
+*   **`src/`**: headers sit beside their sources.
+*   **`include/` + `src/`**: flat or mirrored, so `include/a/b.h` pairs with `src/a/b.c`.
+
+Headers are paired with sources by location only: the same directory first (`x/b.h` to `x/b.c`), then the mirrored `src/` path. Matching by file name alone is never attempted.
+
+The project root is the parent of the nearest `src/` directory above your source file, or the source's own directory if there is none. `include/`, `src/` and the root are passed to the compiler as `-I` paths, so `#include "a/b.h"` works from any source file.
+
+A `.c` file pulled in directly with `#include` is tracked for rebuilds but is not compiled separately.
+
+---
+
 ## Compiler flags
 
 These flags are applied on every compile:
@@ -163,6 +191,7 @@ These flags are applied on every compile:
 | No `.c` extension | Prints a warning, proceeds anyway |
 | Compile error | GCC output printed directly, exits with compiler's code |
 | No compiler found | Prints error to stderr, exits 1 |
+| Header scan fails | Prints a warning to stderr and treats the file as having no header dependencies |
 | Non-zero program exit | Prints `[exit N]` and forwards the code |
 | Program crashed with signal | Prints `[crashed with SIGNAL_NAME]` |
 
@@ -182,7 +211,7 @@ Binaries and object files are stored in `~/.cache/crun/` using the format `<sour
 ## Notes
 
 *   The binary is always named after the main source file, never `a.out`.
-*   Multi-file projects are automatically handled — `#include "header.h"` with a matching `header.c` in the same directory will be discovered, compiled, and linked.
+*   Multi-file projects are automatically handled — `#include "header.h"` with a matching `header.c` in the same directory, or in the mirrored `src/` directory, will be discovered, compiled, and linked. See [Project layouts](#project-layouts).
 *   Works with both relative and absolute paths.
 *   Includes a `--keep` flag to keep a copy of the binary in the source directory.
 *   Includes a `--debug` flag for debugger integration — always recompiles and outputs the binary path without running.
