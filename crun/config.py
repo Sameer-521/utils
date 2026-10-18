@@ -10,6 +10,7 @@ CFLAGS = [
     "-Wconversion",
     "-Wshadow",
     "-g",
+    "-pipe",
 ]
 
 RED = "\033[0;31m"

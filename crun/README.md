@@ -1,6 +1,6 @@
 # crun
 
-Compile, run, and clean up a C source file in one command - like `go run`, but for C.
+Compile and run a C file in one command, like `go run` but for C.
 
 ```
 crun hello.c
@@ -8,22 +8,22 @@ crun args.c foo bar baz
 crun --clean
 ```
 
-No leftover binaries. No accidental `a.out` clobbers. Compiler warnings on by default.
+It leaves no binaries next to your source and never writes an `a.out`. Compiler warnings are on by default.
 
 ---
 
 ## How it works
 
-1. Discovers all local dependencies of your `.c` file using `gcc -MM`, with `include/`, `src/` and the project root on the include path, building a dependency graph via DFS
-2. Topologically sorts all reachable `.c` files so that dependencies are compiled first
-3. Compiles each source file to a separate object file (`.o`), then links them all into a single binary
-4. **Incremental compilation** — on rebuild, only sources whose content or headers have changed are recompiled; untouched `.o` files are reused
-5. Names the binary after the main source file — `hello.c` becomes `./hello`
-6. Runs it, forwarding any arguments you pass
-7. Caches object files and the binary into `~/.cache/crun/`, using SHA256 hash comparison per source and per-source header tracking to skip recompilation when nothing has changed
-8. Tracks the source file path in `source_origin.txt` for cleanup purposes
-9. Forwards the program's exit code back to the shell
-10. Detects and reports crashes caused by signals (e.g., SIGSEGV)
+1. It finds the local dependencies of your `.c` file with `gcc -MM`, using `include/`, `src/` and the project root as include paths.
+2. It sorts the `.c` files it found so dependencies come first.
+3. Each source file is compiled to its own object file (`.o`), then everything is linked into one binary. If several files need compiling, they are compiled in parallel (up to one job per CPU core).
+4. On a rebuild, only sources whose content or headers changed are recompiled. The other `.o` files are reused.
+5. The binary is named after the main source file, so `hello.c` gives `hello`.
+6. It runs the binary and passes along any arguments you gave.
+7. Object files and the binary are cached in `~/.cache/crun/`. Each source is tracked by its SHA256 hash and by the modification times of the headers it includes.
+8. The path of the main source file is saved in `source_origin.txt` so `--clean` can tell when an entry is orphaned.
+9. The program's exit code is passed back to the shell.
+10. If the program dies from a signal (for example SIGSEGV), crun says so.
 
 ---
 
@@ -31,7 +31,7 @@ No leftover binaries. No accidental `a.out` clobbers. Compiler warnings on by de
 
 | Dependency | Minimum version |
 |---|---|
-| Python | 3.9+ |
+| Python | 3.11+ |
 | GCC / cc / clang | any modern version |
 
 ---
@@ -43,9 +43,9 @@ No leftover binaries. No accidental `a.out` clobbers. Compiler warnings on by de
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Sameer-521/utils/main/crun/install.sh | bash
 ```
-If the one-liner doesn't work, please use any of the manual methods as shown below.
+If the one-liner doesn't work, use one of the manual methods below.
 
-Clones the repo, copies `crun/` into `~/.crun/`, and symlinks `~/.local/bin/crun` to the entry point.
+It clones the repo, copies `crun/` into `~/.crun/`, and symlinks `~/.local/bin/crun` to the entry point.
 
 ### Manual (any platform)
 
@@ -74,7 +74,7 @@ rm -rf "$PREFIX/tmp/crun-install"
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
 ```
 
-Termux does not allow writing to `/tmp` without root, so the steps above use `$PREFIX/tmp` instead. The one-liner install also works on Termux, since `install.sh` picks `$TMPDIR` or `$PREFIX/tmp` automatically.
+Termux doesn't allow writing to `/tmp` without root, so these steps use `$PREFIX/tmp` instead. The one-liner also works on Termux, since `install.sh` picks `$TMPDIR` or `$PREFIX/tmp` on its own.
 
 ### Fish shell
 
@@ -86,7 +86,7 @@ rm -rf /tmp/crun-install
 fish_add_path ~/.local/bin
 ```
 
-### Verify
+### Check it works
 
 ```
 crun
@@ -113,11 +113,11 @@ crun hello.c
 crun args.c foo bar baz
 ```
 
-Your program receives these via `argc` / `argv` as normal.
+Your program gets these through `argc` and `argv` as usual.
 
 ### Linking the math library
 
-Use the `--lm` flag to link `libm` during compilation:
+Use `--lm` to link `libm`:
 
 ```bash
 crun --lm math_demo.c
@@ -125,18 +125,32 @@ crun --lm math_demo.c
 
 ### Linking other libraries
 
-Use `--lib NAME` to link any library (`-lNAME`). The option can be repeated:
+Use `--lib NAME` to link any library (`-lNAME`). You can repeat it:
 
 ```bash
 crun --lib readline shell.c
 crun --lib readline --lib ncurses shell.c
 ```
 
-Put crun options before the source file. Anything after it is passed to your program.
+Put crun's options before the source file. Anything after it goes to your program.
+
+### Short options
+
+| Short | Long |
+|---|---|
+| `-c` | `--clean` |
+| `-n` | `--dry-run` |
+| `-F` | `--force-clear-cache` |
+| `-k` | `--keep` |
+| `-d` | `--debug` |
+| `-m` | `--lm` |
+| `-l NAME` | `--lib NAME` |
+
+Short flags can be combined (`-dk`). `-l` takes a value, so put it last or give it separately (`-l readline`).
 
 ### Debug mode
 
-The `--debug` flag always recompiles (no cache), injects `-O0`, and prints the binary path instead of running the program. Useful for piping to a debugger:
+`--debug` always recompiles (no cache), adds `-O0`, and prints the binary path instead of running the program. That makes it easy to hand to a debugger:
 
 ```bash
 crun --debug program.c
@@ -147,15 +161,15 @@ gdb $(crun --debug program.c)
 
 ### Cleaning up the cache
 
-*   **--clean**: Removes orphaned cache entries where the source file no longer exists.
-*   **--dry-run**: Used with `--clean` to see what would be removed without actually deleting files.
-*   **--force-clear-cache**: Completely purges the entire cache directory.
+* `--clean` (`-c`): removes cache entries whose source file no longer exists.
+* `--dry-run` (`-n`): use with `--clean` to see what would be removed without deleting anything.
+* `--force-clear-cache` (`-F`): deletes the whole cache. `-cF` also works, since it is just `-c -F` and the full purge wins.
 
 ---
 
 ## Project layouts
 
-No configuration is needed for these layouts:
+These layouts work without any configuration:
 
 ```
 flat/                 src-only/              include-src/
@@ -166,64 +180,66 @@ flat/                 src-only/              include-src/
                                                  a/b.c
 ```
 
-*   **Flat**: everything in one directory.
-*   **`src/`**: headers sit beside their sources.
-*   **`include/` + `src/`**: flat or mirrored, so `include/a/b.h` pairs with `src/a/b.c`.
+* Flat: everything in one directory.
+* `src/`: headers sit next to their sources.
+* `include/` and `src/`: flat or mirrored, so `include/a/b.h` pairs with `src/a/b.c`.
 
-Headers are paired with sources by location only: the same directory first (`x/b.h` to `x/b.c`), then the mirrored `src/` path. Matching by file name alone is never attempted.
+A header is paired with a source by location only: the same directory first (`x/b.h` with `x/b.c`), then the mirrored `src/` path. File names are never matched on their own.
 
-The project root is the parent of the nearest `src/` directory above your source file, or the source's own directory if there is none. `include/`, `src/` and the root are passed to the compiler as `-I` paths, so `#include "a/b.h"` works from any source file.
+The project root is the parent of the nearest `src/` directory above your source file. If there is none, it is the source's own directory. `include/`, `src/` and the root are passed to the compiler as `-I` paths, so `#include "a/b.h"` works from any source file.
 
-A `.c` file pulled in directly with `#include` is tracked for rebuilds but is not compiled separately.
+A `.c` file that is pulled in with `#include` is tracked for rebuilds but not compiled on its own.
 
 ---
 
 ## Compiler flags
 
-These flags are applied on every compile:
+These flags are used on every compile:
 
-| Flag | Purpose |
+| Flag | What it does |
 |---|---|
-| `-std=gnu99` | GNU C99 standard — VLAs, `stdint.h`, `//` comments, designated initialisers, plus GNU extensions |
-| `-Wall` | All common warnings |
-| `-Wextra` | Extra diagnostic warnings |
-| `-Wpedantic` | Strict ISO conformance; catches GCC-specific extensions |
-| `-Wconversion` | Implicit narrowing and sign conversion warnings |
-| `-Wshadow` | Warns when an inner variable silently hides an outer one |
-| `-g` | Embeds debug symbols |
+| `-std=gnu99` | GNU C99: VLAs, `stdint.h`, `//` comments, designated initialisers, plus GNU extensions |
+| `-Wall` | Common warnings |
+| `-Wextra` | Extra warnings |
+| `-Wpedantic` | Strict ISO conformance, flags GCC-specific extensions |
+| `-Wconversion` | Warns about implicit narrowing and sign conversions |
+| `-Wshadow` | Warns when an inner variable hides an outer one |
+| `-g` | Adds debug symbols |
+| `-pipe` | Uses pipes instead of temp files between compiler stages, which is faster on slow storage like Android |
 
 ---
 
 ## Error handling
 
-| Situation | Behaviour |
+| Situation | What happens |
 |---|---|
-| File not found | Prints error to stderr, exits 1 |
-| No `.c` extension | Prints a warning, proceeds anyway |
-| Compile error | GCC output printed directly, exits with compiler's code |
-| No compiler found | Prints error to stderr, exits 1 |
+| File not found | Prints an error to stderr, exits 1 |
+| No `.c` extension | Prints a warning and carries on |
+| Compile error | Prints the compiler output and exits with the compiler's exit code |
+| No compiler found | Prints an error to stderr, exits 1 |
 | Header scan fails | Prints a warning to stderr and treats the file as having no header dependencies |
-| Non-zero program exit | Prints `[exit N]` and forwards the code |
-| Program crashed with signal | Prints `[crashed with SIGNAL_NAME]` |
+| Program exits non-zero | Prints `[exit N]` and exits with the same code |
+| Program crashes with a signal | Prints `[crashed with SIGNAL_NAME]` |
 
 ---
 
-## Cache management
+## Cache
 
-Binaries and object files are stored in `~/.cache/crun/` using the format `<source-name>-<hash>/`. The script uses a `cache_manifest.json` file to manage:
+Binaries and object files live in `~/.cache/crun/`, in folders named `<source-name>-<hash>/`. A `cache_manifest.json` file in each folder records:
 
-*   **Incremental compilation**: On rebuild, only sources whose content hash or header mtimes have changed are recompiled; untouched `.o` files are reused and only the final link step runs.
-*   **Multi-Source Integrity**: Stores a SHA256 hash for every discovered source file, not just the main one. Automatic dependency discovery means headers with matching `.c` files are included in the build.
-*   **Per-Source Header Tracking**: Tracks modification times of headers included via `#include "..."` on a per-source basis, so touching a shared header only recompiles the sources that actually include it.
-*   **Source Origin**: Keeps the absolute path to the main source file in `source_origin.txt` for cache validation and cleanup.
+* The SHA256 hash of every source file, not just the main one, so a change in any of them triggers a recompile of that file.
+* The modification times of the headers each source includes. Touching a shared header only recompiles the sources that include it.
+* The path of the main source file (kept separately in `source_origin.txt`), used by `--clean`.
+
+On a rebuild, unchanged `.o` files are reused and only the link step runs again.
 
 ---
 
 ## Notes
 
-*   The binary is always named after the main source file, never `a.out`.
-*   Multi-file projects are automatically handled — `#include "header.h"` with a matching `header.c` in the same directory, or in the mirrored `src/` directory, will be discovered, compiled, and linked. See [Project layouts](#project-layouts).
-*   Works with both relative and absolute paths.
-*   Includes a `--keep` flag to keep a copy of the binary in the source directory.
-*   Includes a `--debug` flag for debugger integration — always recompiles and outputs the binary path without running.
-*   No dependencies outside the Python standard library.
+* The binary is always named after the main source file, never `a.out`.
+* Multi-file projects work automatically. If `header.h` has a matching `header.c` in the same directory or in the mirrored `src/` directory, it is found, compiled and linked. See [Project layouts](#project-layouts).
+* Relative and absolute paths both work.
+* `--keep` (`-k`) copies the binary into the source directory.
+* `--debug` (`-d`) always recompiles and prints the binary path without running it.
+* Nothing outside the Python standard library is needed.

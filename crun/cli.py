@@ -4,6 +4,8 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from config import CFLAGS, YELLOW, BOLD, RED, RESET, DIVIDER
@@ -33,14 +35,110 @@ def compile_sources(
 ) -> None:
     out = sys.stderr if debug else sys.stdout
     tag = f"{cc} {label}".strip()
-    for src in stale_sources:
-        obj = obj_path(src, binary)
+    def compile_cmd(src: str, obj: Path, extra: list[str]) -> list[str]:
         include_flags = [f"-I{d}" for d in include_dirs(src)]
-        cmd = [cc, *compile_flags, *include_flags, "-c", src, "-o", str(obj)]
-        print(f"{BOLD}[{tag}]{RESET} compiling {src} → {obj}", file=out)
-        result = subprocess.run(cmd)
-        if result.returncode != 0:
-            die("compilation failed", result.returncode)
+        return [cc, *compile_flags, *extra, *include_flags, "-c", src, "-o", str(obj)]
+
+    if len(stale_sources) < 2:
+        # Zero or one stale source: run exactly as before, stdio inherited.
+        for src in stale_sources:
+            obj = obj_path(src, binary)
+            cmd = compile_cmd(src, obj, [])
+            print(f"{BOLD}[{tag}]{RESET} compiling {src} → {obj}", file=out)
+            result = subprocess.run(cmd)
+            if result.returncode != 0:
+                die("compilation failed", result.returncode)
+    else:
+        # Two or more: compile concurrently (at most cpu_count jobs), capture
+        # each job's output, and replay it in source order.
+        extra = ["-fdiagnostics-color=always"] if sys.stderr.isatty() else []
+        jobs = [(src, obj_path(src, binary)) for src in stale_sources]
+        n = len(jobs)
+        lock = threading.Lock()
+        stop = False  # no new jobs may start (a job failed, or interrupted)
+        kill = False  # running jobs must be killed (interrupted)
+        next_idx = 0
+        running: set[subprocess.Popen] = set()
+        results: list = [None] * n  # (returncode, stdout, stderr) or Exception
+        done = [threading.Event() for _ in range(n)]
+
+        def worker() -> None:
+            nonlocal stop, next_idx
+            while True:
+                # Claiming an index and checking `stop` are atomic, so a job
+                # is only skipped if a job before it in order has already
+                # failed: the first failure in order is always reported.
+                with lock:
+                    if stop or next_idx >= n:
+                        return
+                    i = next_idx
+                    next_idx += 1
+                src, obj = jobs[i]
+                failed = True
+                try:
+                    proc = subprocess.Popen(
+                        compile_cmd(src, obj, extra),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
+                    with lock:
+                        running.add(proc)
+                        if kill:
+                            proc.kill()
+                    try:
+                        so, se = proc.communicate()
+                    finally:
+                        with lock:
+                            running.discard(proc)
+                    results[i] = (proc.returncode, so, se)
+                    failed = proc.returncode != 0
+                except BaseException as exc:  # reported in order by the main thread
+                    results[i] = exc
+                finally:
+                    if failed:
+                        with lock:
+                            stop = True
+                    done[i].set()
+
+        def emit(stream, data: bytes) -> None:
+            if not data:
+                return
+            stream.flush()
+            buf = getattr(stream, "buffer", None)
+            if buf is not None:
+                buf.write(data)
+                buf.flush()
+            else:
+                stream.write(data.decode(errors="replace"))
+                stream.flush()
+
+        workers = min(os.cpu_count() or 1, n)
+        pool = ThreadPoolExecutor(max_workers=workers)
+        try:
+            for _ in range(workers):
+                pool.submit(worker)
+            for i, (src, obj) in enumerate(jobs):
+                done[i].wait()
+                print(f"{BOLD}[{tag}]{RESET} compiling {src} → {obj}", file=out)
+                res = results[i]
+                if isinstance(res, BaseException):
+                    raise res
+                code, so, se = res
+                emit(sys.stdout, so)
+                emit(sys.stderr, se)
+                if code != 0:
+                    die("compilation failed", code)
+        except KeyboardInterrupt:
+            with lock:
+                stop = kill = True
+                for proc in running:
+                    proc.kill()
+            raise
+        finally:
+            # No new jobs start; wait for those already running.
+            with lock:
+                stop = True
+            pool.shutdown(wait=True)
 
     all_objects = [obj_path(src, binary) for src in all_sources]
     link_cmd = [cc, *compile_flags, "-o", str(binary), *[str(o) for o in all_objects]]
@@ -61,34 +159,39 @@ def main() -> None:
     parser.add_argument("source", nargs="?", help="The C source file to run")
 
     parser.add_argument(
+        "-c",
         "--clean", action="store_true", help="Remove orphaned cache entries"
     )
 
     parser.add_argument(
+        "-n",
         "--dry-run",
         action="store_true",
         help="Check for orphaned and corrupted cache entries",
     )
 
     parser.add_argument(
-        "--force-clear-cache", action="store_true", help="Force clear cache"
+        "-F", "--force-clear-cache", action="store_true", help="Force clear cache"
     )
 
     parser.add_argument(
+        "-k",
         "--keep",
         action="store_true",
         help="Keep copy of the binary in the source code directory",
     )
 
     parser.add_argument(
+        "-d",
         "--debug",
         action="store_true",
         help="Compile with debug flags and output the binary path for a debugger",
     )
 
-    parser.add_argument("--lm", action="store_true", help="Link libm")
+    parser.add_argument("-m", "--lm", action="store_true", help="Link libm")
 
     parser.add_argument(
+        "-l",
         "--lib",
         action="append",
         default=[],
