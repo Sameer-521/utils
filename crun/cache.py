@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 from config import CACHE_DIR, BOLD, RESET
-from headers import resolve_local_headers
+from headers import resolve_local_headers, seed_header_cache
 
 HASH_LEN = 8
 
@@ -30,6 +30,7 @@ def write_cache_manifest(sources: list[str], binary: Path, cc: str) -> None:
 
     sources_hashes: dict[str, str] = {}
     all_headers: dict[str, float] = {}
+    scans: dict[str, dict[str, float]] = {}
 
     for src in sources:
         try:
@@ -39,10 +40,13 @@ def write_cache_manifest(sources: list[str], binary: Path, cc: str) -> None:
             continue
         hdrs = resolve_local_headers(src, cc)
         all_headers.update(hdrs)
+        scans[src] = hdrs
 
     manifest_contents = {
+        "cc": cc,
         "sources": sources_hashes,
         "headers": all_headers,
+        "scans": scans,
     }
 
     with open(manifest_file, "w") as file:
@@ -59,6 +63,34 @@ def read_stored_headers(binary: Path) -> tuple[dict[str, str], dict[str, float]]
             return contents.get("sources", {}), contents.get("headers", {})
     except (FileNotFoundError, json.JSONDecodeError):
         return {}, {}
+
+
+def load_header_scans(binary: Path, cc: str) -> set[str]:
+    seeded: set[str] = set()
+    try:
+        with open(binary.parent / "cache_manifest.json", "r") as f:
+            contents = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return seeded
+
+    if contents.get("cc") != cc:
+        return seeded
+
+    stored_sources = contents.get("sources", {})
+    for src, hdrs in contents.get("scans", {}).items():
+        if src not in stored_sources:
+            continue
+        try:
+            with open(src, "rb") as f:
+                if hashlib.file_digest(f, "sha256").hexdigest() != stored_sources[src]:
+                    continue
+            if any(Path(h).stat().st_mtime != m for h, m in hdrs.items()):
+                continue
+        except OSError:
+            continue
+        seed_header_cache(src, cc, hdrs)
+        seeded.add(src)
+    return seeded
 
 
 def get_stale_sources(sources: list[str], binary: Path, cc: str) -> list[str]:

@@ -16,6 +16,7 @@ from cache import (
     write_cache_manifest,
     clear_cache,
     cleanup_orphans,
+    load_header_scans,
 )
 
 
@@ -129,6 +130,7 @@ def main() -> None:
         binary = get_cache_binary_path(source)
         cc = find_compiler()
         assert cc is not None
+        seeded = load_header_scans(binary, cc)
         all_sources = resolve_all_sources(source, cc)
 
         if args.debug:
@@ -160,6 +162,8 @@ def main() -> None:
 
         if not stale and binary.exists():
             print(f"{BOLD}[cache]{RESET} {source} — skipping compilation")
+            if not seeded.issuperset(all_sources):
+                write_cache_manifest(all_sources, binary, cc)
         else:
             binary.parent.mkdir(parents=True, exist_ok=True)
             compile_sources(

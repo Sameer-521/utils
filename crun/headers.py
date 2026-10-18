@@ -33,8 +33,22 @@ def include_dirs(source_file: str) -> list[str]:
     return dirs
 
 
+_header_cache: dict[tuple[str, str], dict[str, float]] = {}
+
+
 def resolve_local_headers(source_file: str, cc: str = "gcc") -> dict[str, float]:
     source_file = os.path.realpath(source_file)
+    key = (source_file, cc)
+    if key not in _header_cache:
+        _header_cache[key] = _scan_local_headers(source_file, cc)
+    return dict(_header_cache[key])
+
+
+def seed_header_cache(source_file: str, cc: str, headers: dict[str, float]) -> None:
+    _header_cache[(os.path.realpath(source_file), cc)] = dict(headers)
+
+
+def _scan_local_headers(source_file: str, cc: str) -> dict[str, float]:
     source_dir = os.path.dirname(source_file)
     include_flags = [f"-I{d}" for d in include_dirs(source_file)]
 
