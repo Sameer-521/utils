@@ -10,6 +10,7 @@ CFLAGS = [
     "-Wconversion",
     "-Wshadow",
     "-g",
+    "-fsanitize=address",
     "-pipe",
 ]
 
