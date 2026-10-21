@@ -2,34 +2,30 @@ import os
 import subprocess
 import sys
 from graphlib import TopologicalSorter
+from pathlib import Path
 
 from config import YELLOW, RESET
 
 
 def include_dirs(source_file: str) -> list[str]:
-    source_dir = os.path.dirname(os.path.realpath(source_file))
+    source_dir = Path(os.path.realpath(source_file)).parent
 
     root = source_dir
-    probe = source_dir
-    while True:
-        if os.path.basename(probe) == "src":
-            root = os.path.dirname(probe)
+    for probe in (source_dir, *source_dir.parents):
+        if probe.name == "src":
+            root = probe.parent
             break
-        parent = os.path.dirname(probe)
-        if parent == probe:
-            break
-        probe = parent
 
     candidates = [
         source_dir,
-        os.path.join(root, "include"),
-        os.path.join(root, "src"),
+        root / "include",
+        root / "src",
         root,
     ]
     dirs: list[str] = []
     for d in candidates:
-        if os.path.isdir(d) and d not in dirs:
-            dirs.append(d)
+        if d.is_dir() and str(d) not in dirs:
+            dirs.append(str(d))
     return dirs
 
 
@@ -149,7 +145,7 @@ def resolve_all_sources(main_source: str, cc: str) -> list[str]:
 def headers_changed(snapshot: dict[str, float]) -> bool:
     for path, old_mtime in snapshot.items():
         try:
-            if os.stat(path).st_mtime != old_mtime:
+            if Path(path).stat().st_mtime != old_mtime:
                 return True
         except FileNotFoundError:
             return True

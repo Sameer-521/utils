@@ -10,7 +10,7 @@ from pathlib import Path
 
 from config import CFLAGS, YELLOW, BOLD, RED, RESET, DIVIDER
 from compiler import find_compiler, die
-from headers import resolve_all_sources, include_dirs
+from headers import resolve_all_sources, resolve_local_headers, include_dirs
 from cache import (
     get_cache_binary_path,
     get_stale_sources,
@@ -151,6 +151,32 @@ def compile_sources(
         die("linking failed", result.returncode)
 
 
+def print_graph(source: str, cc: str) -> None:
+    cwd = Path.cwd()
+
+    def rel(p: str) -> str:
+        return str(Path(p).relative_to(cwd, walk_up=True))
+
+    sources = resolve_all_sources(source, cc)
+
+    inc_dirs: list[str] = []
+    for src in sources:
+        for d in include_dirs(src):
+            if d not in inc_dirs:
+                inc_dirs.append(d)
+
+    print(f"# crun graph for {rel(os.path.realpath(source))} (compiler: {cc})")
+    print("# Link order (dependencies first):")
+    for src in sources:
+        print(f"#   {rel(src)}")
+    print(f"# Include flags: {' '.join('-I' + rel(d) for d in inc_dirs)}")
+    print()
+    for src in sources:
+        headers = sorted(rel(h) for h in resolve_local_headers(src, cc))
+        obj = Path(rel(src)).with_suffix(".o")
+        print(" ".join([f"{obj}: {rel(src)}", *headers]))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compile, run, and clean up C source files."
@@ -188,6 +214,13 @@ def main() -> None:
         help="Compile with debug flags and output the binary path for a debugger",
     )
 
+    parser.add_argument(
+        "-g",
+        "--graph",
+        action="store_true",
+        help="Print the dependency graph (link order and per-file headers) and exit; ignores the cache",
+    )
+
     parser.add_argument("-m", "--lm", action="store_true", help="Link libm")
 
     parser.add_argument(
@@ -222,13 +255,19 @@ def main() -> None:
     cwd = Path().cwd()
 
     try:
-        if not os.path.isfile(source):
+        if not Path(source).is_file():
             die(f"file '{source}' not found")
 
         if not source.endswith(".c"):
             print(
                 f"{YELLOW}warning:{RESET} '{source}' does not have a .c extension, proceeding anyway"
             )
+
+        if args.graph:
+            cc = find_compiler()
+            assert cc is not None
+            print_graph(source, cc)
+            sys.exit(0)
 
         binary = get_cache_binary_path(source)
         cc = find_compiler()
@@ -281,8 +320,7 @@ def main() -> None:
 
             src_origin = binary.parent / "source_origin.txt"
             if not src_origin.exists():
-                with open(src_origin, "w", encoding="utf-8") as f:
-                    f.write(os.path.abspath(source))
+                src_origin.write_text(os.path.abspath(source), encoding="utf-8")
 
             write_cache_manifest(all_sources, binary, cc)
 

@@ -31,7 +31,7 @@ It leaves no binaries next to your source and never writes an `a.out`. Compiler 
 
 | Dependency | Minimum version |
 |---|---|
-| Python | 3.11+ |
+| Python | 3.12+ |
 | GCC / cc / clang | any modern version |
 
 ---
@@ -143,6 +143,7 @@ Put crun's options before the source file. Anything after it goes to your progra
 | `-F` | `--force-clear-cache` |
 | `-k` | `--keep` |
 | `-d` | `--debug` |
+| `-g` | `--graph` |
 | `-m` | `--lm` |
 | `-l NAME` | `--lib NAME` |
 
@@ -157,6 +158,25 @@ crun --debug program.c
 # → /home/user/.cache/crun/program-a1b2c3d4/program
 
 gdb $(crun --debug program.c)
+```
+
+### Dependency graph
+
+`--graph` (`-g`) prints every source file the program needs, in link order (dependencies first), plus the headers each one includes. Nothing is compiled or run, and nothing is written to the cache. It never reads the cache either, so no file is left out because it is "unchanged". Use it to write a Makefile by hand:
+
+```bash
+crun --graph src/main.c
+```
+
+```
+# crun graph for src/main.c (compiler: gcc)
+# Link order (dependencies first):
+#   src/a/b.c
+#   src/main.c
+# Include flags: -Isrc/a -Iinclude -Isrc -I.
+
+src/a/b.o: src/a/b.c include/a/b.h
+src/main.o: src/main.c include/a/b.h
 ```
 
 ### Cleaning up the cache
