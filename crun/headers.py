@@ -8,6 +8,9 @@ from config import YELLOW, RESET
 
 
 def include_dirs(source_file: str) -> list[str]:
+    """
+    figures out the dirs to pass to the -I compiler flag
+    """
     source_dir = Path(os.path.realpath(source_file)).parent
 
     root = source_dir
@@ -45,7 +48,7 @@ def seed_header_cache(source_file: str, cc: str, headers: dict[str, float]) -> N
 
 
 def _scan_local_headers(source_file: str, cc: str) -> dict[str, float]:
-    source_dir = os.path.dirname(source_file)
+    source_dir = Path(source_file).parent
     include_flags = [f"-I{d}" for d in include_dirs(source_file)]
 
     try:
@@ -83,11 +86,11 @@ def _scan_local_headers(source_file: str, cc: str) -> dict[str, float]:
         token = token.strip()
         if not token or token.endswith(".o"):
             continue
-        abs_path = os.path.realpath(os.path.join(source_dir, token))
-        if abs_path == source_file:
+        abs_path = (source_dir / token).resolve()
+        if str(abs_path) == source_file:
             continue
-        if os.path.isfile(abs_path):
-            headers[abs_path] = os.stat(abs_path).st_mtime
+        if abs_path.is_file():
+            headers[str(abs_path)] = abs_path.stat().st_mtime
 
     return headers
 

@@ -155,50 +155,42 @@ def clear_cache():
 
     print("Cache cleared")
 
-
+    
 def cleanup_orphans(dry_run: bool = False) -> None:
-    to_purge = []
-
     if not CACHE_DIR.is_dir():
         return
 
-    if dry_run:
-        print(f"{BOLD}[cleanup --dry-run]{RESET}")
-    else:
-        print(f"{BOLD}[cleanup]{RESET}")
+    print(f"{BOLD}[cleanup{' --dry-run' if dry_run else ''}]{RESET}")
+    verb = "Found" if dry_run else "Purging"
+
+    to_purge: list[tuple[Path, str]] = []
 
     for entry in CACHE_DIR.iterdir():
-        if entry.is_dir():
-            origin_file = entry / "source_origin.txt"
+        if not entry.is_dir():
+            continue
 
-            if origin_file.exists():
-                source_path_str = origin_file.read_text().strip()
-                source_path = Path(source_path_str)
+        origin_file = entry / "source_origin.txt"
+        if not origin_file.exists():
+            to_purge.append((
+                entry,
+                f"{verb} potential corrupted entry: {entry.name} "
+                f"(Missing source_origin.txt)",
+            ))
+            continue
 
-                if not source_path.exists():
-                    p_dict = {
-                        "entry": entry,
-                        "msg": f"Purging orphaned cache entry: {entry.name} (Source missing: {source_path_str})",
-                    }
-                    if dry_run:
-                        p_dict["msg"] = p_dict["msg"].replace("Purging", "Found")
-
-                    to_purge.append(p_dict)
-
-            else:
-                p_dict = {
-                    "entry": entry,
-                    "msg": f"Purging potential corrupted entry: {entry.name} (Missing source_origin.txt)",
-                }
-                if dry_run:
-                    p_dict["msg"] = p_dict["msg"].replace("Purging", "Found")
-
-                to_purge.append(p_dict)
+        source_path_str = origin_file.read_text().strip()
+        if not Path(source_path_str).exists():
+            to_purge.append((
+                entry,
+                f"{verb} orphaned cache entry: {entry.name} "
+                f"(Source missing: {source_path_str})",
+            ))
 
     if not to_purge:
         print("Nothing to cleanup")
-    else:
-        for item in to_purge:
-            print(item["msg"])
-            if not dry_run:
-                shutil.rmtree(item["entry"])
+        return
+
+    for entry, msg in to_purge:
+        print(msg)
+        if not dry_run:
+            shutil.rmtree(entry)
