@@ -115,13 +115,7 @@ crun args.c foo bar baz
 
 Your program gets these through `argc` and `argv` as usual.
 
-### Linking the math library
-
-Use `--lm` to link `libm`:
-
-```bash
-crun --lm math_demo.c
-```
+``
 
 ### Linking other libraries
 
@@ -144,7 +138,6 @@ Put crun's options before the source file. Anything after it goes to your progra
 | `-k` | `--keep` |
 | `-d` | `--debug` |
 | `-g` | `--graph` |
-| `-m` | `--lm` |
 | `-l NAME` | `--lib NAME` |
 
 Short flags can be combined (`-dk`). `-l` takes a value, so put it last or give it separately (`-l readline`).
